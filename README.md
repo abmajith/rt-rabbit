@@ -41,5 +41,5 @@ tasks:
 ```
 
 ```bash
- uv run python -m rt_rabbit examples/standard_rms.yaml 
+ uv run python  rt_rabbit examples/standard_rms.yaml 
 ```
