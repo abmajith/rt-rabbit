@@ -16,7 +16,7 @@ It helps answer:
 - [x] RMS scheduler simulation
 - [x] CPU Utilization analysis
 - [x] CLI interface via `uv`
-- [ ] Timeline visualization
+- [x] Timeline visualization
 - [x] Deadline miss detection
 - [ ] Zephyr / RTOS integration
 - [ ] Trace-based analysis
