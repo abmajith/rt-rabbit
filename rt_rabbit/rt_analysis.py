@@ -3,6 +3,7 @@ from typing import Optional, Dict
 from .task import Task
 from .utils import get_blocking_triplet
 from .utils import calculate_rta, get_utility
+from .utils import generate_system_plot
 from .logger import get_logger
 
 _log = get_logger("RTAnalysis")
@@ -57,12 +58,16 @@ class RTAnalysis:
 
         return results
 
-    def _release_check_at_step(self):
+    def _release_check_at_step(self, history_misses):
         for t in self.tasks:
             if t.release_if_needed(self.time):
                 _log.error(
                     f"T={self.time:.4f}s | {t.task_name} DEADLINE MISS (Overrun)"
                 )
+                # --- Plot related code ---
+                # Track this for the plot
+                history_misses.append((self.time, t.task_name, t.task_core_affinity_id))
+                # --- Plot related code ---
             """
             elif abs(self.time - (t.next_release - t.task_period)) < 1e-9:
                 _log.debug(f"T={self.time:.4f}s | {t.task_name} released")
@@ -105,25 +110,54 @@ class RTAnalysis:
                 _log.info(f"T={self.time:.4f}s | {current.task_name} finished")
                 self.last_task = None
 
-    def run_simulation(self, duration: Optional[float]):
+    def run_simulation(self, duration: Optional[float], plot_requested: bool = False):
         if duration:
             self.duration = duration
         self.time = 0.0
         self.last_task = None
 
+        # for plotting the task execution on the cpu
+        history = []
+        history_misses = []
         _log.info(
             f"--- Starting {self.scheduler} Simulation (Duration: {self.duration}s) ---"
         )
 
         while self.time <= self.duration:
             # release logic
-            self._release_check_at_step()
+            self._release_check_at_step(history_misses)
             # Selection Logic
             current = self._get_current_task()
+
+            # --- Capture State for Plotting ---
+            if plot_requested:
+                # Store what each core is doing at this exact micro-tick
+                res_state = {}
+                if hasattr(self, "resource_map") and self.resource_map and current:
+                    for res, users in self.resource_map.items():
+                        if current.task_name in users:
+                            res_state[res] = "Core 0"
+
+                history.append(
+                    (self.time, [current.task_name if current else "IDLE"], res_state)
+                )
+            # --- Capture State for Plotting ---
+
             # task execution
             self._execute_step(current)
             # update time step
             self.time += self.tick_ms
+
+        # --- Plotting Block ---
+        if plot_requested:
+            generate_system_plot(
+                history,
+                self.tasks,
+                self.resource_map,
+                self.duration,
+                history_misses,
+            )
+        # --- Plotting Block ---
 
     def run_stress_test(
         self,

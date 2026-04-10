@@ -1,9 +1,12 @@
 from typing import Dict, Optional
+from matplotlib import pyplot as plt
+from matplotlib.patches import Patch
 from .rt_analysis import RTAnalysis
 from .task import Task
 from .utils import calculate_rta
 from .utils import get_utility
 from .utils import get_blocking_triplet
+from .utils import generate_system_plot
 from .logger import get_logger
 
 _log = get_logger("RTMultiAnalysis")
@@ -76,12 +79,16 @@ class RTMultiAnalysis:
             multi_results[core_id] = core_results
         return multi_results
 
-    def _release_check_at_step(self):
+    def _release_check_at_step(self, history_misses):
         for t in self.tasks:
             if t.release_if_needed(self.time):
                 _log.error(
                     f"T={self.time:.4f}s | {t.task_name} MISS on Core {t.task_core_affinity_id}"
                 )
+                # --- Plot related code ---
+                # Track this for the plot
+                history_misses.append((self.time, t.task_name, t.task_core_affinity_id))
+                # --- Plot related code ---
             """
             elif abs(self.time - (t.next_release - t.task_period)) < 1e-9:
                 _log.debug(f"T={self.time:.4f}s | {t.task_name} released")
@@ -107,10 +114,15 @@ class RTMultiAnalysis:
                 )
                 analyzer.last_task = None
 
-    def run_simulation(self, duration: Optional[float]):
+    def run_simulation(self, duration: Optional[float], plot_requested: bool = False):
         if duration:
             self.duration = duration
         self.time = 0.0
+
+        # Data structure for plotting: {time: [core0_task, core1_task, ...]}
+        history = []
+        history_misses = []
+
         # Reset task states for simulation
         for t in self.tasks:
             t.remaining_time = 0.0
@@ -121,12 +133,35 @@ class RTMultiAnalysis:
         )
         while self.time <= duration:
             # Release logic for all tasks
-            self._release_check_at_step()
+            self._release_check_at_step(history_misses)
+
+            # --- Capture State for Plotting ---
+            if plot_requested:
+                # Store what each core is doing at this exact micro-tick
+                current_states = []
+                active_resources = {res: "None" for res in self.resource_map.keys()}
+                for core_id in range(self.num_cores):
+                    task = self.core_analyzers[core_id]._get_current_task()
+                    name = task.task_name if task else "IDLE"
+                    current_states.append(name)
+                    if task:
+                        for res, users in self.resource_map.items():
+                            if name in users:
+                                active_resources[res] = f"Core {core_id}"
+                history.append((self.time, current_states, active_resources))
+            # --- Capture State for Plotting ---
 
             # Each core picks and executes its own task
             for core_id, analyzer in self.core_analyzers.items():
                 self._execute_step_single_core(analyzer=analyzer, core_id=core_id)
             self.time += self.tick_ms
+
+        # --- Plotting Block ---
+        if plot_requested and history:
+            generate_system_plot(
+                history, self.tasks, self.resource_map, self.duration, history_misses
+            )
+        # --- Plotting Block ---
 
     def print_multi_rta_report(self):
         """

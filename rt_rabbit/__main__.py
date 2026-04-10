@@ -46,6 +46,7 @@ def main():
     parser.add_argument(
         "--stress", action="store_true", help="Run with hardware jitter/overhead"
     )
+    parser.add_argument("--plot", action="store_true", help="Show the timing plot")
     args = parser.parse_args()
 
     tasks, system, resource_map = load_config(args.config)
@@ -62,7 +63,7 @@ def main():
         )
         # RTA
         engine.print_multi_rta_report()
-        engine.run_simulation(duration)
+        engine.run_simulation(duration, plot_requested=True if args.plot else False)
     else:
         engine = RTAnalysis(tasks, scheduler=scheduler, resource_map=resource_map)
         # RTA
@@ -74,7 +75,7 @@ def main():
                 duration, context_switch_ms=0.00005, jitter_ms=0.0001
             )
         else:
-            engine.run_simulation(duration)
+            engine.run_simulation(duration, plot_requested=True if args.plot else False)
 
 
 if __name__ == "__main__":
