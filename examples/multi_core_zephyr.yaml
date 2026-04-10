@@ -1,0 +1,31 @@
+---
+system:
+  target: zephyr
+  scheduler: RMS
+  duration: 0.04
+  cores: 2
+
+tasks:
+  - name: motor_loop
+    period: 1ms
+    execution: 400us
+    priority: 1
+    core_affinity: 0
+
+  - name: trajectory_planner
+    period: 10ms
+    execution: 3ms
+    priority: 2
+    core_affinity: 0
+
+  - name: perception_ai
+    period: 20ms
+    execution: 8ms
+    priority: 1
+    core_affinity: 1
+
+  - name: telemetry
+    period: 50ms
+    execution: 5ms
+    priority: 2
+    core_affinity: 1

@@ -1,0 +1,23 @@
+---
+system:
+  scheduler: RMS
+  duration: 0.02
+
+tasks:
+  - name: IMU_Sense
+    period: 2ms
+    execution: 500us
+    priority: 1
+    max_chunk: 0
+
+  - name: Motor_Control
+    period: 5ms
+    execution: 1ms
+    priority: 2
+    max_chunk: 0
+
+  - name: Logging
+    period: 10ms
+    execution: 2ms
+    priority: 3
+    max_chunk: 0

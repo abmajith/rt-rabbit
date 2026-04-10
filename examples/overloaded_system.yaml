@@ -1,0 +1,23 @@
+---
+system:
+  scheduler: EDF  # Try switching this to RMS to see the failure
+  duration: 0.05
+
+tasks:
+  - name: Critical_Task
+    period: 5ms
+    execution: 3ms
+    priority: 1
+    max_chunk: 0
+
+  - name: Medium_Task
+    period: 12ms
+    execution: 4ms
+    priority: 2
+    max_chunk: 0
+
+  - name: Telemetry
+    period: 25ms
+    execution: 8ms
+    priority: 3
+    max_chunk: 0

@@ -1,0 +1,29 @@
+---
+system:
+  target: zephyr
+  scheduler: RMS
+  duration: 0.02
+  tick_hz: 1000
+  cores: 1
+
+tasks:
+  - name: motor_control
+    period: 1ms
+    execution: 300us
+    priority: 1
+    max_chunk: 0
+    core_affinity: 0
+
+  - name: sensor_read
+    period: 5ms
+    execution: 800us
+    priority: 2
+    max_chunk: 0
+    core_affinity: 0
+
+  - name: communication
+    period: 10ms
+    execution: 2ms
+    priority: 3
+    max_chunk: 0
+    core_affinity: 0

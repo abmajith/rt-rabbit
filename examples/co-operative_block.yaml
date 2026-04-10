@@ -1,0 +1,23 @@
+---
+system:
+  scheduler: FP
+  duration: 0.05
+
+tasks:
+  - name: Emergency_Stop
+    period: 10ms
+    execution: 1ms
+    priority: 1
+    max_chunk: 0
+
+  - name: User_Interface
+    period: 20ms
+    execution: 4ms
+    priority: 10      # Medium priority
+    max_chunk: 0
+
+  - name: Flash_Write
+    period: 40ms
+    execution: 10ms
+    priority: -1      # Cooperative!
+    max_chunk: 0.005  # Blocks others for up to 5ms
