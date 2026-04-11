@@ -127,10 +127,7 @@ class RTAnalysis:
             # --- Capture State for Plotting ---
             if plot_requested:
                 # Store what each core is doing at this exact micro-tick
-                res_state = {}
-                history.append(
-                    (self.time, [current.task_name if current else "IDLE"], res_state)
-                )
+                history.append((self.time, [current.task_name if current else "IDLE"]))
             # --- Capture State for Plotting ---
 
             # task execution

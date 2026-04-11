@@ -1,6 +1,4 @@
 from typing import Dict, Optional
-from matplotlib import pyplot as plt
-from matplotlib.patches import Patch
 from .rt_analysis import RTAnalysis
 from .task import Task
 from .utils import calculate_rta
@@ -117,6 +115,7 @@ class RTMultiAnalysis:
             self.duration = duration
         self.time = 0.0
 
+        global_lock_owner: Optional[int] = None
         # Data structure for plotting: {time: [core0_task, core1_task, ...]}
         history = []
         history_misses = []
@@ -137,12 +136,11 @@ class RTMultiAnalysis:
             if plot_requested:
                 # Store what each core is doing at this exact micro-tick
                 current_states = []
-                active_resources = {}
                 for core_id in range(self.num_cores):
                     task = self.core_analyzers[core_id]._get_current_task()
                     name = task.task_name if task else "IDLE"
                     current_states.append(name)
-                history.append((self.time, current_states, active_resources))
+                history.append((self.time, current_states))
             # --- Capture State for Plotting ---
 
             # Each core picks and executes its own task

@@ -21,12 +21,13 @@ class Task:
         self.__is_cooperative = priority < 0
         self.__core_id = core_id
         self.__deadline = deadline if deadline else period
-        self.is_spinning = False
 
         # State variables
         self.remaining_time = 0.0
         self.next_release = 0.0
         self.deadline = self.__deadline
+        self.is_spinning = False
+        self.current_chunk_remaining = 0.0
 
     @property
     def task_max_chunk(self) -> int:
@@ -79,8 +80,17 @@ class Task:
             return missed
         return False
 
-    def execute(self, amount: float):
+    def execute(self, amount: float, is_blocked_by_remote: bool = False):
         # perfect preemption, no overhead
+        # MSRP spin execution logic was added
+        if is_blocked_by_remote:
+            self.is_spinning = True
+            return
+        self.is_spinning = False
         self.remaining_time -= amount
+        if self.current_chunk_remaining > 0:
+            self.current_chunk_remaining -= amount
         if self.remaining_time < 0:
-            self.remaining_time = 0
+            self.remaining_time = 0.0
+        if self.current_chunk_remaining < 0:
+            self.current_chunk_remaining = 0.0
