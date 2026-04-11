@@ -37,7 +37,7 @@ class RTAnalysis:
                 if t.task_priority == task.task_priority and t != task
             ]
 
-            # Use the triplet logic, but since we are single core, b_remote will be 0
+            # Use the triplet logic, in single core, b_remote will be 0
             b_local, _, _ = get_blocking_triplet(task, self.tasks, resource_map)
 
             # If no resource map is provided, fall back to max_chunk of ANY lower task (pessimistic)
@@ -88,9 +88,13 @@ class RTAnalysis:
         if self.scheduler == "RMS":
             return min(ready, key=lambda x: (x.task_period, x.task_priority))
         elif self.scheduler == "EDF":
-            return min(ready, key=lambda x: (x.deadline, x.task_priority))
+            return min(
+                ready, key=lambda x: (x.deadline, x.remaining_time, x.task_priority)
+            )
         elif self.scheduler == "FP":
             return min(ready, key=lambda x: x.task_priority)
+        elif self.scheduler == "LST":
+            return min(ready, key=lambda x: x.deadline - self.time - x.remaining_time)
         return None
 
     def _execute_step(self, current: Optional[Task]):

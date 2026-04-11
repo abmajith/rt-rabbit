@@ -18,6 +18,9 @@ def calculate_rta(
     Initial: Ri = Ci + Bi + Ii (Interference) + Si (Same priority interference)
     Update: Ii = sum(ceil(Ri/Tj)Ci)
     """
+    # Too pessimistic, in RMS this can happen
+    # FIFO, not every task can state ready at once
+    # in RR, its time slice, some rough bound should introduced later
     Si = sum(t.task_exec_time for t in sp_tasks) if sp_tasks else 0
     ri = task_exec_time + blocking_time + Si
 
@@ -41,7 +44,9 @@ def get_blocking_triplet(
     task: Task, all_tasks: list[Task], resource_map: dict
 ) -> tuple[float, float, float]:
     """
-    Calculates the blocking from shared resources
+    Calculates the blocking from shared resources,
+    Blocking model assumes non-nested critical sections and bounded max_chunk
+    Assumes only one remote blocking at worst case
     """
     if not resource_map:
         return 0.0, 0.0, 0.0
