@@ -21,7 +21,6 @@ def load_config(path):
         data = yaml.safe_load(f)
 
     system = data.get("system", {})
-    resources = data.get("resources", {})
     tasks = []
 
     for t in data.get("tasks", []):
@@ -35,7 +34,7 @@ def load_config(path):
                 core_id=t.get("core_affinity", 0),
             )
         )
-    return tasks, system, resources
+    return tasks, system
 
 
 def main():
@@ -49,7 +48,7 @@ def main():
     parser.add_argument("--plot", action="store_true", help="Show the timing plot")
     args = parser.parse_args()
 
-    tasks, system, resource_map = load_config(args.config)
+    tasks, system = load_config(args.config)
     num_cores = system.get("cores", 1)
     scheduler = system.get("scheduler", "RMS")
     duration = system.get("duration", 0.1)
@@ -59,9 +58,7 @@ def main():
     print(f"[*] Target RTOS: {target.upper()}")
 
     if num_cores > 1:
-        engine = RTMultiAnalysis(
-            tasks, num_cores=num_cores, scheduler=scheduler, resource_map=resource_map
-        )
+        engine = RTMultiAnalysis(tasks, num_cores=num_cores, scheduler=scheduler)
         # RTA
         engine.print_multi_rta_report()
         engine.run_simulation(duration, plot_requested=True if args.plot else False)

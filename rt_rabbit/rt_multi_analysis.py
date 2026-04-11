@@ -5,7 +5,7 @@ from .rt_analysis import RTAnalysis
 from .task import Task
 from .utils import calculate_rta
 from .utils import get_utility
-from .utils import get_blocking_triplet
+from .utils import calculate_msrp_delays
 from .utils import generate_system_plot
 from .logger import get_logger
 
@@ -19,7 +19,6 @@ class RTMultiAnalysis:
         num_cores: int = 2,
         scheduler: str = "RMS",
         tick_ms: float = 0.0001,
-        resource_map: dict | None = None,
     ):
         self.tasks = tasks
         self.num_cores = num_cores
@@ -27,7 +26,6 @@ class RTMultiAnalysis:
         self.tick_ms = tick_ms
         self.time = 0.0
         self.duration = 0.1
-        self.resource_map = resource_map
 
         # Create virtual "Single Core Analyzers" for each physical core
         self.core_analyzers = {}
@@ -38,7 +36,6 @@ class RTMultiAnalysis:
     def run_multi_rta(self) -> Dict[int, Dict[str, dict]]:
         """Analyze simple RTA safety per core."""
         multi_results = {}
-        resource_map = self.resource_map or {}
 
         for core_id, analyzer in self.core_analyzers.items():
             core_results = {}
@@ -48,33 +45,34 @@ class RTMultiAnalysis:
                     t for t in analyzer.tasks if t.task_priority < task.task_priority
                 ]
 
+                # MSRP specific delays
+                b_local, b_remote = calculate_msrp_delays(task, self.tasks)
+                # Same-priority interference (FIFO logic)
                 # 2. Same-Priority Interference (FIFO Queue on local core)
                 sp_tasks = [
                     t
                     for t in analyzer.tasks
                     if t.task_priority == task.task_priority and t != task
                 ]
-
-                # 3. Resource Blocking (The "Constraint" logic from your notes)
-                b_local, b_remote, _ = get_blocking_triplet(
-                    task, self.tasks, resource_map
-                )
-
+                i_same = sum(t.task_exec_time for t in sp_tasks)
                 # Note: We ignore i_same from triplet here because sp_tasks
                 # covers all tasks on the core, which is safer for FIFO.
-                total_b = b_local + b_remote
+                total_blocking = b_local + b_remote
 
                 ri = calculate_rta(
-                    task.task_exec_time,
-                    task.task_period,
+                    task,
                     hp_tasks,
-                    total_b,
-                    sp_tasks,
+                    total_blocking,
+                    i_same,
                 )
                 core_results[task.task_name] = {
                     "rt": ri,
                     "safe": ri <= task.task_period,
-                    "metrics": {"b_local": b_local, "b_remote": b_remote},
+                    "metrics": {
+                        "b_local": b_local,
+                        "b_remote": b_remote,
+                        "spin": b_remote,
+                    },
                 }
             multi_results[core_id] = core_results
         return multi_results
@@ -139,15 +137,11 @@ class RTMultiAnalysis:
             if plot_requested:
                 # Store what each core is doing at this exact micro-tick
                 current_states = []
-                active_resources = {res: "None" for res in self.resource_map.keys()}
+                active_resources = {}
                 for core_id in range(self.num_cores):
                     task = self.core_analyzers[core_id]._get_current_task()
                     name = task.task_name if task else "IDLE"
                     current_states.append(name)
-                    if task:
-                        for res, users in self.resource_map.items():
-                            if name in users:
-                                active_resources[res] = f"Core {core_id}"
                 history.append((self.time, current_states, active_resources))
             # --- Capture State for Plotting ---
 
@@ -158,9 +152,7 @@ class RTMultiAnalysis:
 
         # --- Plotting Block ---
         if plot_requested and history:
-            generate_system_plot(
-                history, self.tasks, self.resource_map, self.duration, history_misses
-            )
+            generate_system_plot(history, self.tasks, self.duration, history_misses)
         # --- Plotting Block ---
 
     def print_multi_rta_report(self):

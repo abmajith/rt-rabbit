@@ -52,9 +52,7 @@ def calculate_pcp_delay_factors(
     # for co-operative tasks have ceiling priority higher than all preemptive task
 
     lp_tasks = [t for t in all_tasks if t.task_priority > task.task_priority]
-    b_local: float = 0.0
-    if lp_tasks:
-        b_local = max(b_local, max(t.task_max_chunk for t in lp_tasks))
+    b_local: float = max([0.0] + [t.task_max_chunk for t in lp_tasks])
 
     # I_same same priority interference
     sp_tasks = [
@@ -73,58 +71,35 @@ def calculate_pcp_delay_factors(
     return b_local, i_same
 
 
-def get_blocking_triplet(
-    task: Task, all_tasks: list[Task], resource_map: dict
-) -> tuple[float, float, float]:
+def calculate_msrp_delays(task: Task, all_tasks: list[Task]) -> tuple[float, float]:
     """
-    Calculates the blocking from shared resources,
-    Blocking model assumes non-nested critical sections and bounded max_chunk
-    Assumes only one remote blocking at worst case
+    MSRP theory:
+    B_local: Priority inversion on the same core.
+    B_remote (spin): waiting for tasks on other cores to release global resources
     """
-    if not resource_map:
-        return 0.0, 0.0, 0.0
-    b_local: float = 0.0  # same core id
-    b_remote: float = 0.0  # from different core id
-    i_same: float = 0.0  # from same core id with same priority (FIFO/Queue)
-    for res_id, users in resource_map.items():
-        if task.task_name in users:
-            # 1. LOCAL SAME PRIORITY (Interference - The Sum)
-            # These tasks are on the same core and share the resource.
-            # If they are already running, you wait for their whole execution.
-            same_prio = [
-                t
-                for t in all_tasks
-                if t.task_name in users
-                and t.task_core_affinity_id == task.task_core_affinity_id
-                and t.task_priority == task.task_priority
-                and t.task_name != task.task_name
-            ]
-            i_same += sum(t.task_exec_time for t in same_prio)
+    my_core = task.task_core_affinity_id
 
-            # 2. LOCAL LOWER PRIORITY (Blocking - The Max)
-            # These tasks are on the same core but lower priority.
-            # You only wait for their current 'max_chunk' to finish.
-            lower_prio = [
-                t
-                for t in all_tasks
-                if t.task_name in users
-                and t.task_core_affinity_id == task.task_core_affinity_id
-                and t.task_priority > task.task_priority
-            ]
-            if lower_prio:
-                b_local = max(b_local, max(t.task_max_chunk for t in lower_prio))
+    # B_LOCAL: Lower priority tasks on my core that are non-preemptive (max_chunk)
+    lp_local = [
+        t
+        for t in all_tasks
+        if t.task_core_affinity_id == my_core and t.task_priority > task.task_priority
+    ]
+    b_local: float = max([0.0] + [t.task_max_chunk for t in lp_local])
 
-            # 3. REMOTE BLOCKING (Cross-Core - The Max)
-            # Task on another core is using the hardware (e.g., I2C bus)
-            remote_users = [
-                t
-                for t in all_tasks
-                if t.task_name in users
-                and t.task_core_affinity_id != task.task_core_affinity_id
-            ]
-            if remote_users:
-                b_remote = max(b_remote, max(t.task_max_chunk for t in remote_users))
-    return b_local, b_remote, i_same
+    # B_REMOVE: (MSRP Spin)
+    # IN MSRP, the 'spin' is the sum of the max critical sections of
+    # tasks on OTHER cores that could be accessed while we are waiting.
+    # Logic: For every other core, find the longest chunk that could be block us.
+    b_remote = 0.0
+    other_cores = set(
+        t.task_core_affinity_id for t in all_tasks if t.task_core_affinity_id != my_core
+    )
+    for core_id in other_cores:
+        remote_tasks = [t for t in all_tasks if t.task_core_affinity_id == core_id]
+        b_remote += max([0.0] + [t.task_max_chunk for t in remote_tasks])
+
+    return b_local, b_remote
 
 
 def get_utility(tasks: Optional[list[Task]]) -> float:
@@ -156,7 +131,7 @@ def get_thu_bound(periods: list[float]) -> float:
     return n * (2 ** (1 / n) - 1)
 
 
-def generate_system_plot(history, tasks, resource_map=None, duration=0.1, misses=None):
+def generate_system_plot(history, tasks, duration=0.1, misses=None):
     """
     Restores the high-precision vertical period ticks for both
     Single and Multi-core analysis.
@@ -166,11 +141,10 @@ def generate_system_plot(history, tasks, resource_map=None, duration=0.1, misses
 
     times = [h[0] for h in history]
     num_cores = len(history[0][1])
-    num_res = len(resource_map) if resource_map else 0
     # Use the actual tick from history if possible
     tick_ms = times[1] - times[0] if len(times) > 1 else 0.0001
 
-    fig, ax = plt.subplots(figsize=(14, (num_cores + num_res) * 1.5))
+    fig, ax = plt.subplots(figsize=(14, (num_cores) * 1.5))
 
     # 1. Setup Colors
     all_task_names = list(set(t.task_name for t in tasks))
@@ -219,21 +193,6 @@ def generate_system_plot(history, tasks, resource_map=None, duration=0.1, misses
             )
             # Optional: Draw a subtle red span across the whole core lane for that period
             ax.axvspan(miss_time, miss_time + 0.001, color="red", alpha=0.3)
-
-    # 4. Resource / Bus Lanes
-    if resource_map:
-        for res_idx, res_name in enumerate(resource_map.keys()):
-            y_pos = (num_cores + res_idx) * 10
-            for i in range(len(times) - 1):
-                owner = history[i][2].get(res_name, "None")
-                if owner != "None":
-                    ax.broken_barh(
-                        [(times[i], tick_ms)],
-                        (y_pos, 8),
-                        facecolors="red",
-                        alpha=0.5,
-                        zorder=2,
-                    )
 
     # 5. Labels & Formatting
     ax.set_xlabel("Time (s)")
@@ -304,11 +263,6 @@ def generate_system_plot(history, tasks, resource_map=None, duration=0.1, misses
                     rotation=90 if run_duration < 0.005 else 0,
                 )
 
-    if resource_map:
-        for r in resource_map.keys():
-            y_ticks.append((num_cores + len(y_ticks) - num_cores) * 10 + 4)
-            y_labels.append(f"BUS: {r}")
-
     ax.set_yticks(y_ticks)
     ax.set_yticklabels(y_labels, fontsize=8)
 
@@ -316,10 +270,7 @@ def generate_system_plot(history, tasks, resource_map=None, duration=0.1, misses
     legend_elements = [Patch(facecolor=idle_color, label="IDLE")]
     for name in all_task_names:
         legend_elements.append(Patch(facecolor=color_map[name], label=name))
-    if resource_map:
-        legend_elements.append(
-            Patch(facecolor="red", alpha=0.5, label="Bus Contention")
-        )
+
     if misses:
         legend_elements.append(
             Line2D(

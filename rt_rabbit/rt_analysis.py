@@ -143,7 +143,6 @@ class RTAnalysis:
             generate_system_plot(
                 history,
                 self.tasks,
-                {},
                 self.duration,
                 history_misses,
             )
