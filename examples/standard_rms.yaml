@@ -1,6 +1,7 @@
 ---
 system:
   scheduler: RMS
+  priority_policy: FIFO
   duration: 0.02
 
 tasks:

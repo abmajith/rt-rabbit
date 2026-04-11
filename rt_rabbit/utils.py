@@ -7,22 +7,18 @@ from .task import Task
 
 
 def calculate_rta(
-    task_exec_time: float,
-    task_period: float,
+    task: Task,
     hp_tasks: Optional[list[Task]],
-    blocking_time: float = 0.0,  # b_local + b_remote
-    sp_tasks: Optional[list[Task]] = None,
+    blocking_time: float = 0.0,
+    interference_time: float = 0.0,
 ):
     """
     Core Response Time Analysis math used by all analyzers.
-    Initial: Ri = Ci + Bi + Ii (Interference) + Si (Same priority interference)
+    Initial: Ri = Ci + Bi + Ii (Interference)
     Update: Ii = sum(ceil(Ri/Tj)Ci)
     """
     # Too pessimistic, in RMS this can happen
-    # FIFO, not every task can state ready at once
-    # in RR, its time slice, some rough bound should introduced later
-    Si = sum(t.task_exec_time for t in sp_tasks) if sp_tasks else 0
-    ri = task_exec_time + blocking_time + Si
+    ri = task.task_exec_time + blocking_time + interference_time
 
     while True:
         # Higher-priority preemption
@@ -32,12 +28,49 @@ def calculate_rta(
             else 0
         )
 
-        new_ri = task_exec_time + blocking_time + Si + interference
+        new_ri = task.task_exec_time + blocking_time + interference_time + interference
         if abs(new_ri - ri) < 1e-9:
             return ri
-        if new_ri > task_period:
+        if new_ri > task.task_period:
             return float("inf")  # System is mathematically unsafe
         ri = new_ri
+
+
+def calculate_pcp_delay_factors(
+    task: Task,
+    all_tasks: list[Task],
+    priority_policy: str = "FIFO",
+    quantum: float = 0.001,
+) -> tuple[float, float]:
+    """
+    Calculate delays based on PRIORITY CEILING PROTOCOL theory
+    B_local: blocking from lower priority tasks.
+    I_same: interference from same priority tasks.
+    """
+    # B_local (PCB Theory):
+    # In PCP/Zephyr, blocked by MAX max_chunk of any lower priority tasks
+    # for co-operative tasks have ceiling priority higher than all preemptive task
+
+    lp_tasks = [t for t in all_tasks if t.task_priority > task.task_priority]
+    b_local: float = 0.0
+    if lp_tasks:
+        b_local = max(b_local, max(t.task_max_chunk for t in lp_tasks))
+
+    # I_same same priority interference
+    sp_tasks = [
+        t for t in all_tasks if t.task_priority == task.task_priority and t != task
+    ]
+    i_same = 0.0
+    if not sp_tasks:
+        return b_local, i_same
+    if priority_policy == "FIFO":
+        # pessimistic worst case
+        i_same = sum(t.task_exec_time for t in sp_tasks)
+    elif priority_policy == "RR":
+        i_same = len(sp_tasks) * quantum
+    else:
+        raise NotImplementedError(f"{priority_policy} policy was not implemented")
+    return b_local, i_same
 
 
 def get_blocking_triplet(

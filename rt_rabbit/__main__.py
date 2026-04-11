@@ -54,6 +54,7 @@ def main():
     scheduler = system.get("scheduler", "RMS")
     duration = system.get("duration", 0.1)
     target = system.get("target", "zephyr").lower()
+    priority_policy = system.get("priority_policy", "FIFO").lower()
 
     print(f"[*] Target RTOS: {target.upper()}")
 
@@ -65,7 +66,7 @@ def main():
         engine.print_multi_rta_report()
         engine.run_simulation(duration, plot_requested=True if args.plot else False)
     else:
-        engine = RTAnalysis(tasks, scheduler=scheduler, resource_map=resource_map)
+        engine = RTAnalysis(tasks, scheduler=scheduler, priority_policy=priority_policy)
         # RTA
         engine.print_rt_report()
         # Simulation
@@ -74,6 +75,7 @@ def main():
             engine.run_stress_test(
                 duration, context_switch_ms=0.00005, jitter_ms=0.0001
             )
+            engine.print_stress_report(context_switch_ms=0.00005, jitter_ms=0.0001)
         else:
             engine.run_simulation(duration, plot_requested=True if args.plot else False)
 

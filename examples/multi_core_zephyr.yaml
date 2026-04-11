@@ -2,6 +2,7 @@
 system:
   target: zephyr
   scheduler: RMS
+  priority_policy: FIFO
   duration: 0.04
   cores: 2
 

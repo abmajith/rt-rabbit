@@ -1,6 +1,7 @@
 ---
 system:
   scheduler: FP
+  priority_policy: FIFO
   duration: 0.05
 
 tasks:

@@ -1,6 +1,7 @@
 ---
 system:
   scheduler: EDF  # Try switching this to RMS to see the failure
+  priority_policy: FIFO
   duration: 0.05
 
 tasks:

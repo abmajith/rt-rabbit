@@ -1,7 +1,7 @@
 import random
 from typing import Optional, Dict
 from .task import Task
-from .utils import get_blocking_triplet
+from .utils import calculate_pcp_delay_factors
 from .utils import calculate_rta, get_utility
 from .utils import generate_system_plot
 from .logger import get_logger
@@ -15,7 +15,8 @@ class RTAnalysis:
         tasks: list[Task],
         scheduler: str = "RMS",
         tick_ms: float = 0.0001,
-        resource_map: dict | None = None,
+        priority_policy: str = "FIFO",  # or RR,
+        quantum_tick: float = 0.001,
     ):
         self.tasks = tasks
         self.scheduler = scheduler
@@ -23,37 +24,27 @@ class RTAnalysis:
         self.time = 0.0
         self.duration = 0.1
         self.last_task = None
-        self.resource_map = resource_map
+        self.priority_policy = priority_policy
+        self.quantum_tick = quantum_tick
 
     def run_rta(self) -> Dict[str, dict]:
         """Mathematical Response Time Analysis with Zephyr Blocking logic."""
         results = {}
-        resource_map = self.resource_map or {}
         for _, task in enumerate(self.tasks):
             hp_tasks = [t for t in self.tasks if t.task_priority < task.task_priority]
-            sp_tasks = [
-                t
-                for t in self.tasks
-                if t.task_priority == task.task_priority and t != task
-            ]
-
-            # Use the triplet logic, in single core, b_remote will be 0
-            b_local, _, _ = get_blocking_triplet(task, self.tasks, resource_map)
-
-            # If no resource map is provided, fall back to max_chunk of ANY lower task (pessimistic)
-            if not resource_map:
-                lp_tasks = [
-                    t for t in self.tasks if t.task_priority > task.task_priority
-                ]
-                b_local = max([t.task_max_chunk for t in (lp_tasks + sp_tasks)] + [0])
-
-            ri = calculate_rta(
-                task.task_exec_time, task.task_period, hp_tasks, b_local, sp_tasks
+            b_local, i_same = calculate_pcp_delay_factors(
+                task=task,
+                all_tasks=self.tasks,
+                priority_policy=self.priority_policy,
+                quantum=self.quantum_tick,
             )
+
+            ri = calculate_rta(task, hp_tasks, b_local, i_same)
             results[task.task_name] = {
                 "rt": ri,
                 "safe": ri <= task.task_period,
                 "blocking": b_local,
+                "sp_interference": i_same,
             }
 
         return results
@@ -137,11 +128,6 @@ class RTAnalysis:
             if plot_requested:
                 # Store what each core is doing at this exact micro-tick
                 res_state = {}
-                if hasattr(self, "resource_map") and self.resource_map and current:
-                    for res, users in self.resource_map.items():
-                        if current.task_name in users:
-                            res_state[res] = "Core 0"
-
                 history.append(
                     (self.time, [current.task_name if current else "IDLE"], res_state)
                 )
@@ -157,7 +143,7 @@ class RTAnalysis:
             generate_system_plot(
                 history,
                 self.tasks,
-                self.resource_map,
+                {},
                 self.duration,
                 history_misses,
             )
@@ -329,13 +315,13 @@ class RTAnalysis:
 
         return advice
 
-    def print_stress_report(self, csw: float, jitter: float):
+    def print_stress_report(self, context_switch_ms: float, jitter_ms: float):
         """Prints a report focused on hardware overhead and jitter."""
         _log.info("=" * 50)
         _log.info(f"RT-RABBIT STRESS & FRAGILITY REPORT")
         _log.info("=" * 50)
 
-        stress_advice = self.get_stress_advice(csw, jitter)
+        stress_advice = self.get_stress_advice(context_switch_ms, jitter_ms)
 
         if not stress_advice:
             _log.info(
@@ -346,52 +332,3 @@ class RTAnalysis:
             for msg in stress_advice:
                 _log.warning(f"  [!] {msg}")
         _log.info("=" * 50)
-
-    def get_slack_optimizer_advice(self) -> list[str]:
-        suggestions = []
-        rta_results = self.run_rta()
-
-        for name, res in rta_results.items():
-            task = next(t for t in self.tasks if t.task_name == name)
-            # Target: Response Time + 10% safety margin
-            target_period = (
-                res["rt"] * 1.1 if res["rt"] != float("inf") else task.task_period * 1.2
-            )
-
-            if not res["safe"] or res["rt"] > (task.task_period * 0.9):
-                suggestions.append(
-                    f"OPTIMIZE: Increase '{name}' period from {task.task_period:.4f}s "
-                    f"to {target_period:.4f}s to ensure a 10% safety buffer."
-                )
-        return suggestions
-
-    def check_priority_inversion(self, resource_map: Dict[str, list[str]]):
-        advice = []
-        for mutex, users in resource_map.items():
-            # Get the actual task objects for the users of this mutex
-            user_tasks = [t for t in self.tasks if t.task_name in users]
-            if len(user_tasks) < 2:
-                continue
-
-            # Sort users by priority (highest priority first)
-            user_tasks.sort(key=lambda x: x.task_priority)
-            for i in range(len(user_tasks)):
-                for j in range(i + 1, len(user_tasks)):
-                    t_high = user_tasks[i]
-                    t_low = user_tasks[j]
-                    # Find ANY task in the system that sits between them
-                    # and DOES NOT use the mutex.
-                    blockers = [
-                        t
-                        for t in self.tasks
-                        if t_high.task_priority < t.task_priority < t_low.task_priority
-                        and t.task_name not in users
-                    ]
-
-                    if blockers:
-                        blocker_names = ", ".join([b.task_name for b in blockers])
-                        advice.append(
-                            f"INVERSION RISK: '{t_high.task_name}' can be indirectly blocked "
-                            f"by {blocker_names} while '{t_low.task_name}' holds {mutex}."
-                        )
-        return list(set(advice))
