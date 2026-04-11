@@ -1,0 +1,9 @@
+system:
+  cores: 1
+  scheduler: "FP"
+  duration: 0.05
+tasks:
+  - {name: "Urgent_Preemptive", period: 5ms, execution: 2ms, priority: 5}
+  - {name: "Coop_Worker", period: 20ms, execution: 10ms, priority: -1} 
+  # Result: Coop_Worker will block Urgent_Preemptive for its entire 10ms execution.
+  # Urgent_Preemptive should MISS its 5ms deadline.
