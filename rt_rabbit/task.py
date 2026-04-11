@@ -21,6 +21,7 @@ class Task:
         self.__is_cooperative = priority < 0
         self.__core_id = core_id
         self.__deadline = deadline if deadline else period
+        self.is_spinning = False
 
         # State variables
         self.remaining_time = 0.0

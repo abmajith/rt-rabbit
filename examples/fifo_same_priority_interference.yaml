@@ -1,11 +1,24 @@
+---
 system:
   cores: 1
-  scheduler: "RMS"
-  priority_policy: "FIFO"
+  scheduler: RMS
+  priority_policy: FIFO
   duration: 0.1
+
 tasks:
-  - {name: "A", period: 50ms, execution: 10ms, priority: 10}
-  - {name: "B", period: 50ms, execution: 10ms, priority: 10}
-  - {name: "C", period: 50ms, execution: 10ms, priority: 10}
+  - name:  A 
+    period: 50ms 
+    execution: 10ms 
+    priority: 10
+
+  - name: B
+    period: 50ms 
+    execution: 10ms 
+    priority: 10
+
+  - name: C
+    period: 50ms 
+    execution: 10ms
+    priority: 10
   # Result: Task C has R = 10(A) + 10(B) + 10(C) = 30ms.
   # If execution times were larger, the FIFO queue would cause a failure.

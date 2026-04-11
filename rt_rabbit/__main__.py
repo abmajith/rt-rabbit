@@ -53,7 +53,7 @@ def main():
     scheduler = system.get("scheduler", "RMS")
     duration = system.get("duration", 0.1)
     target = system.get("target", "zephyr").lower()
-    priority_policy = system.get("priority_policy", "FIFO").lower()
+    priority_policy = system.get("priority_policy", "FIFO")
 
     print(f"[*] Target RTOS: {target.upper()}")
 

@@ -1,18 +1,19 @@
-___
+---
 system:
   cores: 2
-  scheduler: "RMS"
+  scheduler: RMS
+  priority_policy: FIFO
   duration: 0.05
 
 tasks:
-  - name: "Critical_Control"
+  - name: Critical Control
     period: 10ms
     execution: 4ms
     priority: 1
     core_affinity: 0
     max_chunk: 0.5ms
 
-  - name: "Heavy_IO_Worker"
+  - name: Heavy IO Worker
     period: 50ms
     execution: 20ms
     priority: 10
