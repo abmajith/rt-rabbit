@@ -1,0 +1,9 @@
+system:
+  cores: 1
+  scheduler: "RMS"
+  duration: 0.2
+tasks:
+  - {name: "T1", period: 20ms, execution: 10ms, priority: 1}
+  - {name: "T2", period: 60ms, execution: 20ms, priority: 2} 
+  # Result: Harmonic (60/20=3). Utilization = 0.5 + 0.33 = 0.83. 
+  # Should be SAFE because U < 1.0 for harmonic systems.
