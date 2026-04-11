@@ -1,0 +1,8 @@
+system:
+  cores: 2
+  scheduler: "RMS"
+  duration: 0.1
+tasks:
+  - {name: "Fast_Core0", period: 10ms, execution: 2ms, priority: 1, core_affinity: 0, max_chunk: 0.1ms}
+  - {name: "Slow_Core1", period: 100ms, execution: 50ms, priority: 10, core_affinity: 1, max_chunk: 9ms}
+  # Result: Fast_Core0 should fail. R = 2ms + 9ms (spin) = 11ms (> 10ms period).
