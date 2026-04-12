@@ -1,23 +1,22 @@
 # rt-rabbit 🐇
 
-Real-time robotics analysis & verification toolkit.
+Real-Time Response-Time Analysis (RTA) & Verification Toolkit
+rt-rabbit provides deterministic analysis and cycle-accurate simulation for real-time task sets. It is designed to bridge the gap between theoretical schedulability analysis and practical system behavior under hardware-realistic conditions.
 
-## 🚀 What is this?
+## 🧠 Core Analysis Engine
 
-rt-rabbit is a tool to analyze real-time behavior in robotics systems.
+The toolkit implements industry-standard real-time synchronization protocols:
+- [Single-Core (PCP)](./single_core_rt.md): Analyzes local priority inversion and preemption using the Priority Ceiling Protocol and Response Time Analysis (RTA).
+- [Multi-Core (MSRP)](./multi_core_rt.md): Evaluates cross-core resource contention and global spin-locking behavior using the Multiprocessor Stack Resource Policy.
 
-It helps answer:
-- Will my control loop miss deadlines?
-- What happens under CPU load?
-- Is my scheduling safe?
-## 🧠 Features
+
+## 🛠 Feature
 
 - [x] Task modeling (period, execution time, priority)
-- [x] RMS scheduler simulation
-- [x] CPU Utilization analysis
-- [x] CLI interface via `uv`
-- [x] Timeline visualization
-- [x] Deadline miss detection
+- [x] Task Simulation, Stress Test (by injecting context-switch overhead (Csw​) and release jitter (Ji​)) runs. 
+- [x] Verification: Mathematical RTA for RMS, EDF, and Fixed Priority (FP) schedulers.
+- [x] MSRP/PCP Simulation: Native support for shared resources and non-preemptible critical sections.
+- [x] Diagnostic Plotting: High-precision Gantt charts with MSRP spin-tracking and deadline-miss "Red Zones."
 - [ ] Zephyr / RTOS integration
 - [ ] Trace-based analysis
 
