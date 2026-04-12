@@ -1,0 +1,25 @@
+---
+system:
+  target: zephyr
+  cores: 2
+  scheduler: RMS
+  priority_policy: FIFO
+  duration: 0.03     # 30ms simulation
+  resources: 1      # Only one lock to fight over
+
+tasks:
+  - name: LockHog_C0
+    period: 20ms
+    execution: 15ms
+    priority: 1
+    core_affinity: 0
+    resource_id: 0
+    max_chunk: 10ms  # Holds lock for 10ms of its 15ms life
+
+  - name: Waiter_C1
+    period: 20ms
+    execution: 15ms
+    priority: 1
+    core_affinity: 1
+    resource_id: 0
+    max_chunk: 10ms  # Will definitely have to wait

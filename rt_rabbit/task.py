@@ -11,16 +11,23 @@ class Task:
         max_chunk=None,
         core_id: int = 0,
         deadline: Optional[float] = None,
+        resource_id: Optional[
+            int
+        ] = None,  # maximum one global resource id a task can use
     ):
         # Task properties
         self.__name = name
         self.__period = period
         self.__exec_time = exec_time
         self.__priority = priority
-        self.__max_chunk = max_chunk or 0
+        self.__is_cooperative = priority < 0
+        # in zephyr max_chunk should be exec_time if its cooperative task
+        # important for PIP (Priority Inheritance protocol)or PCP Priority Ceiling Protocol
+        self.__max_chunk = self.__exec_time if self.__is_cooperative else max_chunk or 0
         self.__is_cooperative = priority < 0
         self.__core_id = core_id
         self.__deadline = deadline if deadline else period
+        self.__resource_id = resource_id
 
         # State variables
         self.remaining_time = 0.0
@@ -61,6 +68,10 @@ class Task:
     def task_core_affinity_id(self) -> int:
         return self.__core_id
 
+    @property
+    def task_resource_id(self) -> int:
+        return self.__resource_id if self.__resource_id else -1
+
     def is_ready(self, current_time: float) -> bool:
         return self.remaining_time > 1e-9
 
@@ -72,6 +83,7 @@ class Task:
         ):
             missed = self.remaining_time > 1e-9
             self.remaining_time = self.__exec_time
+            self.current_chunk_remaining = self.__max_chunk
             # release time progress as 0, T, 2T,...
             # deadline progress as D, T+D, 2T+D,...
             release_time = self.next_release
@@ -81,7 +93,7 @@ class Task:
         return False
 
     def execute(self, amount: float, is_blocked_by_remote: bool = False):
-        # perfect preemption, no overhead
+        # perfect preemption, no overhead assumed
         # MSRP spin execution logic was added
         if is_blocked_by_remote:
             self.is_spinning = True

@@ -32,6 +32,7 @@ def load_config(path):
                 priority=t["priority"],
                 max_chunk=parse_time(t.get("max_chunk", 0)),
                 core_id=t.get("core_affinity", 0),
+                resource_id=t.get("resource_id", None),
             )
         )
     return tasks, system
@@ -54,11 +55,14 @@ def main():
     duration = system.get("duration", 0.1)
     target = system.get("target", "zephyr").lower()
     priority_policy = system.get("priority_policy", "FIFO")
+    resources = system.get("resources", 0)
 
     print(f"[*] Target RTOS: {target.upper()}")
 
     if num_cores > 1:
-        engine = RTMultiAnalysis(tasks, num_cores=num_cores, scheduler=scheduler)
+        engine = RTMultiAnalysis(
+            tasks, num_cores=num_cores, scheduler=scheduler, system_resources=resources
+        )
         # RTA
         engine.print_multi_rta_report()
         engine.run_simulation(duration, plot_requested=True if args.plot else False)
@@ -70,9 +74,15 @@ def main():
         if args.stress:
             # Pass hardware constants likely derived from your board design
             engine.run_stress_test(
-                duration, context_switch_ms=0.00005, jitter_ms=0.0001
+                duration,
+                context_switch_ms=0.00005,
+                jitter_ms=0.0001,
+                plot_requested=True if args.plot else False,
             )
-            engine.print_stress_report(context_switch_ms=0.00005, jitter_ms=0.0001)
+            engine.print_stress_report(
+                context_switch_ms=0.00005,
+                jitter_ms=0.0001,
+            )
         else:
             engine.run_simulation(duration, plot_requested=True if args.plot else False)
 

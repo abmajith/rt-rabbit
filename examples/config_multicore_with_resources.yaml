@@ -1,0 +1,50 @@
+---
+system:
+  target: zephyr
+  cores: 2
+  scheduler: RMS
+  priority_policy: FIFO
+  duration: 0.1     # Simulation runs for 100ms
+  resources: 2      # Total global spin-locks available
+
+tasks:
+  # --- CORE 0 TASKS ---
+  - name: Vision_HP
+    period: 10ms
+    execution: 2ms
+    priority: 1
+    core_affinity: 0
+    resource_id: 0   # Shares Lock 0 with Core 1
+    max_chunk: 0.5ms
+
+  - name: Control_LP
+    period: 50ms
+    execution: 15ms
+    priority: 10
+    core_affinity: 0
+    resource_id: 1   # Shares Lock 1 with Core 1
+    max_chunk: 5ms
+
+  # --- CORE 1 TASKS ---
+  - name: Sensor_HP
+    period: 12ms
+    execution: 3ms
+    priority: 2
+    core_affinity: 1
+    resource_id: 0   # Contends with Vision_HP on Core 0
+    max_chunk: 1ms
+
+  - name: Heavy_Comm
+    period: 80ms
+    execution: 40ms
+    priority: 12
+    core_affinity: 1
+    resource_id: 1   # Contends with Control_LP on Core 0
+    max_chunk: 10ms
+
+  # --- A COOPERATIVE TASK (Non-preemptive) ---
+  - name: Logger_Coop
+    period: 100ms
+    execution: 5ms
+    priority: -1     # Negative priority triggers Zephyr Coop logic
+    core_affinity: 0

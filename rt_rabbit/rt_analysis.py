@@ -150,6 +150,7 @@ class RTAnalysis:
         duration: Optional[float],
         context_switch_ms: float = 0.00005,
         jitter_ms: float = 0.0001,
+        plot_requested: bool = False,
     ):
         """
         Stress Test Simulation:
@@ -162,6 +163,10 @@ class RTAnalysis:
             self.duration = duration
         self.time = 0.0
         self.last_task = None
+
+        # for plotting the task execution on the cpu
+        history = []
+        history_misses = []
 
         _log.info(
             f"--- STRESS TEST START (Csw: {context_switch_ms}s, Jitter: {jitter_ms}s) ---"
@@ -179,6 +184,12 @@ class RTAnalysis:
             # Selection Logic
             current = self._get_current_task()
 
+            # --- Capture State for Plotting ---
+            if plot_requested:
+                # Store what each core is doing at this exact micro-tick
+                history.append((self.time, [current.task_name if current else "IDLE"]))
+            # --- Capture State for Plotting ---
+
             #  CONTEXT SWITCH OVERHEAD
             if current != self.last_task and current is not None:
                 _log.debug(
@@ -188,6 +199,16 @@ class RTAnalysis:
 
             self._execute_step(current)
             self.time += self.tick_ms
+
+        # --- Plotting Block ---
+        if plot_requested:
+            generate_system_plot(
+                history,
+                self.tasks,
+                self.duration,
+                history_misses,
+            )
+        # --- Plotting Block ---
 
     def setDuration(self, duration: Optional[float]):
         if duration:

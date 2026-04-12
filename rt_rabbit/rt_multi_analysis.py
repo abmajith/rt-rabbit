@@ -1,5 +1,6 @@
 from typing import Dict, Optional
 from .rt_analysis import RTAnalysis
+from resource_arbiter import ResourceArbiter
 from .task import Task
 from .utils import calculate_rta
 from .utils import get_utility
@@ -17,6 +18,7 @@ class RTMultiAnalysis:
         num_cores: int = 2,
         scheduler: str = "RMS",
         tick_ms: float = 0.0001,
+        system_resources: int = 0,
     ):
         self.tasks = tasks
         self.num_cores = num_cores
@@ -24,6 +26,7 @@ class RTMultiAnalysis:
         self.tick_ms = tick_ms
         self.time = 0.0
         self.duration = 0.1
+        self.system_resources = system_resources
 
         # Create virtual "Single Core Analyzers" for each physical core
         self.core_analyzers = {}
@@ -53,8 +56,8 @@ class RTMultiAnalysis:
                     if t.task_priority == task.task_priority and t != task
                 ]
                 i_same = sum(t.task_exec_time for t in sp_tasks)
-                # Note: We ignore i_same from triplet here because sp_tasks
                 # covers all tasks on the core, which is safer for FIFO.
+                # For RR, for the worst case, following calculation is okay
                 total_blocking = b_local + b_remote
 
                 ri = calculate_rta(
@@ -90,30 +93,52 @@ class RTMultiAnalysis:
                 _log.debug(f"T={self.time:.4f}s | {t.task_name} released")
             """
 
-    def _execute_step_single_core(self, analyzer: RTAnalysis, core_id: int):
-        """Internal: Logs switching and executes task work."""
-        analyzer.time = self.time  # Sync time to sub-analyzers
-        current = analyzer._get_current_task()
-        # Context switch logging needs to be core-aware
+    def _execute_step_single_core(self, analyzer: RTAnalysis, core_id: int, current: Optional[Task]):
+        """Internal: Executes the task provided by the multi-core orchestrator."""
+        analyzer.time = self.time  
+    
+        # Context switch logging
         if current != analyzer.last_task:
             if current:
-                _log.info(
-                    f"T={self.time:.4f}s | [Core {core_id}] -> {current.task_name}"
-                )
+                _log.info(f"T={self.time:.4f}s | [Core {core_id}] -> {current.task_name}")
             analyzer.last_task = current
 
         if current:
-            current.execute(self.tick_ms)
+            # Use the spinning state already determined by arbitration
+            current.execute(self.tick_ms, is_blocked_by_remote=current.is_spinning)
+
             if not current.is_ready(self.time):
                 _log.info(
                     f"T={self.time:.4f}s | [Core {core_id}] -> {current.task_name} finished"
                 )
+                # Cleanup for next release
+                current.is_spinning = False
+                current.current_chunk_remaining = 0.0
                 analyzer.last_task = None
+
+    def _handle_resource_arbitration(self, active_map, arbiter):
+        for core_id, task in active_map.items():
+            if not task:
+                continue
+
+            # Only tasks with a remaining chunk and a valid resource seek a lock
+            res_id = task.task_resource_id
+            if res_id != -1 and task.current_chunk_remaining > 0:
+                granted = arbiter.request_lock(res_id, core_id)
+                task.is_spinning = not granted
+
+                # IMPORTANT: Only release if we actually finished the chunk work
+                if task.current_chunk_remaining <= 1e-12:
+                    arbiter.release_lock(res_id, core_id)
+            else:
+                # No resource needed or chunk finished
+                task.is_spinning = False
 
     def run_simulation(self, duration: Optional[float], plot_requested: bool = False):
         if duration:
             self.duration = duration
         self.time = 0.0
+        arbiter = ResourceArbiter(num_locks=self.system_resources)
 
         global_lock_owner: Optional[int] = None
         # Data structure for plotting: {time: [core0_task, core1_task, ...]}
@@ -124,6 +149,8 @@ class RTMultiAnalysis:
         for t in self.tasks:
             t.remaining_time = 0.0
             t.next_release = 0.0
+            t.is_spinning = False
+            t.current_chunk_remaining = 0.0
 
         _log.info(
             f"--- Multi-Core ({self.num_cores}) {self.scheduler} Simulation ({self.duration}s) ---"
@@ -132,20 +159,35 @@ class RTMultiAnalysis:
             # Release logic for all tasks
             self._release_check_at_step(history_misses)
 
+            # Get candidate tasks for each core
+            active_map = {
+                cid: a._get_current_task() for cid, a in self.core_analyzers.items()
+            }
+            self._handle_resource_arbitration(active_map, arbiter)
+
             # --- Capture State for Plotting ---
             if plot_requested:
                 # Store what each core is doing at this exact micro-tick
                 current_states = []
                 for core_id in range(self.num_cores):
-                    task = self.core_analyzers[core_id]._get_current_task()
-                    name = task.task_name if task else "IDLE"
-                    current_states.append(name)
+                    task = active_map[core_id]
+                    if task:
+                        label = (
+                            f"{task.task_name} (SPIN)"
+                            if task.is_spinning
+                            else task.task_name
+                        )
+                        current_states.append(label)
+                    else:
+                        current_states.append("IDLE")
                 history.append((self.time, current_states))
             # --- Capture State for Plotting ---
 
             # Each core picks and executes its own task
             for core_id, analyzer in self.core_analyzers.items():
-                self._execute_step_single_core(analyzer=analyzer, core_id=core_id)
+                task_to_run = active_map[core_id]
+                self._execute_step_single_core(analyzer, core_id, task_to_run)
+
             self.time += self.tick_ms
 
         # --- Plotting Block ---
