@@ -5,13 +5,20 @@ from .task import Task
 from .utils import calculate_rta
 from .utils import get_utility
 from .utils import calculate_msrp_delays
-from .utils import generate_system_plot
 from .logger import get_logger
+from .plot_rt_timing import generate_system_plot
 
 _log = get_logger("RTMultiAnalysis")
 
 
 class RTMultiAnalysis:
+    """
+    Orchestrates Multi-Core Real-Time Analysis using MSRP for resource synchronization.
+
+    This class manages multiple single-core RTAnalysis engines and a global
+    ResourceArbiter to simulate cross-core contention and busy-waiting (spinning).
+    """
+
     def __init__(
         self,
         tasks: list[Task],
@@ -269,4 +276,13 @@ class RTMultiAnalysis:
                     if data["metrics"]["b_local"] > 0 and data["rt"] != float("inf"):
                         _log.warning(
                             f"  [!] '{name}' is heavily delayed by local priority inversion."
+                        )
+                    # 3. High Preemption (Interference) Reminder
+                    # If RT is high but blocking is low, it's preemption
+                    if data["rt"] != float("inf") and (
+                        data["metrics"]["b_remote"] + data["metrics"]["b_local"]
+                    ) < (0.2 * data["rt"]):
+                        _log.warning(
+                            f"  [Observation] '{name}' appears to be heavily preempted by higher-priority tasks. "
+                            "Consider if the priority assignments or periods are creating a bottleneck here."
                         )

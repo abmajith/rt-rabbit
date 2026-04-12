@@ -3,8 +3,8 @@ from typing import Optional, Dict
 from .task import Task
 from .utils import calculate_pcp_delay_factors
 from .utils import calculate_rta, get_utility
-from .utils import generate_system_plot
 from .logger import get_logger
+from .plot_rt_timing import generate_system_plot
 
 _log = get_logger("RTAnalysis")
 

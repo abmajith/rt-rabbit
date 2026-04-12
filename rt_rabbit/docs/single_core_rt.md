@@ -9,11 +9,10 @@
 - get_rt_report(): Diagnoses "Unsafe" systems by identifying if the root cause is Utilization, Cooperative Blocking, or Preemption Interference.
 
 ## RTA Logic: 
-Implements the standard RTA recurrence relation: Ri(n+1)​=Ci​+Bi​+∑j∈hp(i)​⌈Tj​Ri(n)​​⌉Cj​.
-Context: Used for both Single-Core (PCP) and Multi-Core (MSRP) to find the convergence point where task execution and preemptions stabilize.
+- Implements the **standard RTA** recurrence relation: Ri(n+1)​=Ci​+Bi​+∑j∈hp(i)​⌈Tj​Ri(n)​​⌉Cj​.
+- **Context:** Used for both Single-Core (PCP) and Multi-Core (MSRP) to find the convergence point where task execution and preemptions stabilize.
 
 ## PCP Delay Factor Logic: 
 Quantifies non-preemptive delays based on Zephyr/PCP scheduling theory.
-Blocal​: Calculates the blocking term as max(Lj​) for all lower-priority tasks (j∈lp(i)), representing the wait time for a non-preemptive "chunk" to finish.
-
-Isame​: Calculates interference from tasks with identical priority based on the OS policy (FIFO assumes worst-case arrival; RR assumes a single quantum delay).
+- **Blocal​:** Calculates the blocking term as max(Lj​) for all lower-priority tasks (j∈lp(i)), representing the wait time for a non-preemptive "chunk" to finish.
+- **Isame​:** Calculates interference from tasks with identical priority based on the OS policy (FIFO assumes worst-case arrival; RR assumes a single quantum delay).
