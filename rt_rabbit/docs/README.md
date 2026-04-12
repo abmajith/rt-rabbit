@@ -6,9 +6,9 @@ RT-Rabbit is a simulator and mathematical analyzer for real-time periodic tasks,
 
 
 Select a module below to view specific analysis logic, scheduling theories, and protocol implementations:
-- Single-Core Analysis (./single_core_rt.md)
+- [Single-Core Analysis](./single_core_rt.md)
     * Covers RMS, EDF, and PCP (Priority Ceiling Protocol). Focuses on local blocking and preemption.
-- Multi-Core Analysis (./multi_core_rt.md)
+- [Multi-Core Analysis](./multi_core_rt.md)
     * Covers MSRP (Multiprocessor Stack Resource Policy). Focuses on cross-core spin-locking and global resource contention.
 
 
