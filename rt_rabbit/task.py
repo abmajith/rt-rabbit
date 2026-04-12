@@ -2,6 +2,20 @@ from typing import Optional
 
 
 class Task:
+    """
+    Unified Task model for Real-Time Systems supporting MSRP and PCP.
+
+    This class serves as the core entity for both Single-Core and Multi-Core
+    simulations. It encapsulates Zephyr-specific task behaviors and the
+    resource synchronization logic required for different RTOS protocols.
+
+    Assumptions & Constraints:
+        - MSRP (Multi-Core): Uses busy-waiting (spinning) for global resources.
+        - PCP (Single-Core): Uses priority ceilings to prevent local inversion.
+        - Zephyr Logic: Negative priorities denote 'Cooperative' tasks, which
+        are modeled as having a critical section equal to their full execution time.
+    """
+
     def __init__(
         self,
         name: str,
@@ -15,6 +29,21 @@ class Task:
             int
         ] = None,  # maximum one global resource id a task can use
     ):
+        """
+        Initializes a Task with dual-protocol support.
+
+        Args:
+            name: Task identifier.
+            period: Repetition interval (T).
+            exec_time: Computational requirement (C).
+            priority: positive means pre-emptive, negative means co-operative task in Zephyr.
+            max_chunk: Duration of the critical section (L). In MSRP, this is the
+                locked duration; in PCP, this defines the blocking term (B).
+            core_id: CPU affinity (0-N-1).
+            deadline: Relative deadline (D). Defaults to T if None.
+            resource_id: Global/Local resource identifier.
+        """
+
         # Task properties
         self.__name = name
         self.__period = period
@@ -23,8 +52,8 @@ class Task:
         self.__is_cooperative = priority < 0
         # in zephyr max_chunk should be exec_time if its cooperative task
         # important for PIP (Priority Inheritance protocol)or PCP Priority Ceiling Protocol
-        self.__max_chunk = self.__exec_time if self.__is_cooperative else max_chunk or 0
         self.__is_cooperative = priority < 0
+        self.__max_chunk = self.__exec_time if self.__is_cooperative else max_chunk or 0
         self.__core_id = core_id
         self.__deadline = deadline if deadline else period
         self.__resource_id = resource_id
@@ -37,7 +66,7 @@ class Task:
         self.current_chunk_remaining = 0.0
 
     @property
-    def task_max_chunk(self) -> int:
+    def task_max_chunk(self) -> float:
         return self.__max_chunk
 
     @property
@@ -70,7 +99,8 @@ class Task:
 
     @property
     def task_resource_id(self) -> int:
-        return self.__resource_id if self.__resource_id else -1
+        # Explicitly check for None so that 0 is treated as a valid ID
+        return self.__resource_id if self.__resource_id is not None else -1
 
     def is_ready(self, current_time: float) -> bool:
         return self.remaining_time > 1e-9
@@ -93,6 +123,18 @@ class Task:
         return False
 
     def execute(self, amount: float, is_blocked_by_remote: bool = False):
+        """
+        Advances the task's progress by one simulation tick.
+
+        Logic:
+            - If MSRP Blocked: task is_spinning=True. No progress on C.
+            - If Running: decrements both remaining_time and current_chunk_remaining.
+
+        Args:
+            amount: Time elapsed in the current tick.
+            is_blocked_by_remote: Flag from Arbiter indicating cross-core resource wait.
+        """
+
         # perfect preemption, no overhead assumed
         # MSRP spin execution logic was added
         if is_blocked_by_remote:
@@ -100,8 +142,7 @@ class Task:
             return
         self.is_spinning = False
         self.remaining_time -= amount
-        if self.current_chunk_remaining > 0:
-            self.current_chunk_remaining -= amount
+        self.current_chunk_remaining -= amount
         if self.remaining_time < 0:
             self.remaining_time = 0.0
         if self.current_chunk_remaining < 0:

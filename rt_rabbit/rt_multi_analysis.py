@@ -27,7 +27,6 @@ class RTMultiAnalysis:
         self.time = 0.0
         self.duration = 0.1
         self.system_resources = system_resources
-
         # Create virtual "Single Core Analyzers" for each physical core
         self.core_analyzers = {}
         for i in range(num_cores):
@@ -93,46 +92,72 @@ class RTMultiAnalysis:
                 _log.debug(f"T={self.time:.4f}s | {t.task_name} released")
             """
 
-    def _execute_step_single_core(self, analyzer: RTAnalysis, core_id: int, current: Optional[Task]):
-        """Internal: Executes the task provided by the multi-core orchestrator."""
-        analyzer.time = self.time  
-    
-        # Context switch logging
+    def _execute_step_single_core(
+        self, analyzer: RTAnalysis, core_id: int, current: Optional[Task]
+    ):
+        analyzer.time = self.time
+
+        # 1. Handle Context Switching Logs
         if current != analyzer.last_task:
             if current:
-                _log.info(f"T={self.time:.4f}s | [Core {core_id}] -> {current.task_name}")
+                _log.info(
+                    f"T={self.time:.4f}s | [Core {core_id}] -> {current.task_name}"
+                )
             analyzer.last_task = current
 
         if current:
-            # Use the spinning state already determined by arbitration
+            # 2. Transition Logging: Detect ENTERING and EXITING spin state
+            # We use a temporary attribute on the task object to track previous state
+            was_spinning = getattr(current, "_prev_spinning", False)
+
+            if current.is_spinning and not was_spinning:
+                _log.info(
+                    f"T={self.time:.4f}s | [Core {core_id}] {current.task_name} ENTERED SPIN (Resource Contention)"
+                )
+
+            elif not current.is_spinning and was_spinning:
+                _log.info(
+                    f"T={self.time:.4f}s | [Core {core_id}] {current.task_name} RELEASED FROM SPIN (Acquired Resource)"
+                )
+
+            # Save current state for next tick comparison
+            current._prev_spinning = current.is_spinning
+
+            # 3. Execute work
             current.execute(self.tick_ms, is_blocked_by_remote=current.is_spinning)
 
+            # 4. Handle Completion
             if not current.is_ready(self.time):
                 _log.info(
                     f"T={self.time:.4f}s | [Core {core_id}] -> {current.task_name} finished"
                 )
-                # Cleanup for next release
                 current.is_spinning = False
+                current._prev_spinning = False  # Reset for next release
                 current.current_chunk_remaining = 0.0
                 analyzer.last_task = None
 
     def _handle_resource_arbitration(self, active_map, arbiter):
+        # Pass 1: Handle Releases
         for core_id, task in active_map.items():
             if not task:
                 continue
-
-            # Only tasks with a remaining chunk and a valid resource seek a lock
             res_id = task.task_resource_id
-            if res_id != -1 and task.current_chunk_remaining > 0:
+
+            # If task is done with its chunk or has no resource, release it
+            if res_id == -1 or task.current_chunk_remaining <= 1e-12:
+                arbiter.release_lock(res_id, core_id)
+                task.is_spinning = False
+
+        # Pass 2: Handle Requests
+        for core_id, task in active_map.items():
+            if not task:
+                continue
+            res_id = task.task_resource_id
+
+            if res_id != -1 and task.current_chunk_remaining > 1e-12:
+                # This will now actually be called because res_id will be 0, not -1
                 granted = arbiter.request_lock(res_id, core_id)
                 task.is_spinning = not granted
-
-                # IMPORTANT: Only release if we actually finished the chunk work
-                if task.current_chunk_remaining <= 1e-12:
-                    arbiter.release_lock(res_id, core_id)
-            else:
-                # No resource needed or chunk finished
-                task.is_spinning = False
 
     def run_simulation(self, duration: Optional[float], plot_requested: bool = False):
         if duration:
@@ -140,7 +165,6 @@ class RTMultiAnalysis:
         self.time = 0.0
         arbiter = ResourceArbiter(num_locks=self.system_resources)
 
-        global_lock_owner: Optional[int] = None
         # Data structure for plotting: {time: [core0_task, core1_task, ...]}
         history = []
         history_misses = []

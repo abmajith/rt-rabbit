@@ -10,6 +10,14 @@ _log = get_logger("RTAnalysis")
 
 
 class RTAnalysis:
+    """
+    Single-core Real-Time Analyzer supporting RMS, EDF, FP, and LST scheduling.
+
+    This class provides both mathematical Response Time Analysis (RTA) and
+    cycle-accurate simulation to validate task set schedulability under
+    Priority Ceiling Protocol (PCP) and Zephyr cooperative constraints.
+    """
+
     def __init__(
         self,
         tasks: list[Task],
@@ -28,7 +36,7 @@ class RTAnalysis:
         self.quantum_tick = quantum_tick
 
     def run_rta(self) -> Dict[str, dict]:
-        """Mathematical Response Time Analysis with Zephyr Blocking logic."""
+        """Performs fixed-point RTA calculation including PCP blocking and same-priority interference."""
         results = {}
         for _, task in enumerate(self.tasks):
             hp_tasks = [t for t in self.tasks if t.task_priority < task.task_priority]
