@@ -37,6 +37,10 @@ class RTAnalysis:
 
     def run_rta(self) -> Dict[str, dict]:
         """Performs fixed-point RTA calculation including PCP blocking and same-priority interference."""
+
+        if self.scheduler == "EDF":
+            _log.warning("EDF uses different schedulability analysis (Not FP-RTA)")
+
         results = {}
         for _, task in enumerate(self.tasks):
             hp_tasks = [t for t in self.tasks if t.task_priority < task.task_priority]

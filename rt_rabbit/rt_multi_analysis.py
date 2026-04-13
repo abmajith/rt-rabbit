@@ -43,7 +43,9 @@ class RTMultiAnalysis:
     def run_multi_rta(self) -> Dict[int, Dict[str, dict]]:
         """Analyze simple RTA safety per core."""
         multi_results = {}
-
+        if self.scheduler == "EDF":
+            _log.warning("EDF uses different schedulability analysis (Not FP-RTA)")
+            
         for core_id, analyzer in self.core_analyzers.items():
             core_results = {}
             for task in analyzer.tasks:

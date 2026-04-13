@@ -73,6 +73,8 @@ def calculate_pcp_delay_factors(
     if priority_policy == "FIFO":
         # pessimistic worst case
         i_same = sum(t.task_exec_time for t in sp_tasks)
+    if priority_policy == "FIFO_TIGHT":
+        i_same = max(t.task_exec_time for t in sp_tasks)
     elif priority_policy == "RR":
         i_same = len(sp_tasks) * quantum
     else:
