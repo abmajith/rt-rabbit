@@ -15,7 +15,11 @@ dev = [
 
 
 [project.scripts]
-rt-rabbit = "rt_rabbit.__main__:main"
+rma_analysis = "rma_analysis.__main__:main"
+
+
+[tool.hatch.build.targets.wheel]
+packages = ["rma_analysis"]
 
 [build-system]
 requires = ["hatchling"]

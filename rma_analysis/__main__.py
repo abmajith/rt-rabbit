@@ -1,9 +1,9 @@
 import sys
 import yaml
 import argparse
-from rt_rabbit.task import Task
-from rt_rabbit.rt_analysis import RTAnalysis
-from rt_rabbit.rt_multi_analysis import RTMultiAnalysis
+from rma_analysis.task import Task
+from rma_analysis.rt_analysis import RTAnalysis
+from rma_analysis.rt_multi_analysis import RTMultiAnalysis
 
 
 def parse_time(s):

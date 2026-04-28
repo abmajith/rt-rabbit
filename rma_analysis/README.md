@@ -40,14 +40,14 @@ tasks:
 ```
 
 ```bash
- uv run python  rt_rabbit examples/standard_rms.yaml 
+ uv run python  rma_analysis examples/standard_rms.yaml 
 ```
 Graphical plot
 ```bash
- uv run python  rt_rabbit examples/standard_rms.yaml --plot 
+ uv run python  rma_analysis examples/standard_rms.yaml --plot 
 ```
 
 Rt Stress test
 ```bash
- uv run python  rt_rabbit examples/standard_rms.yaml --stress 
+ uv run python  rma_analysis examples/standard_rms.yaml --stress 
 ```
