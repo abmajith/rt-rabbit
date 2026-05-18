@@ -18,6 +18,6 @@
     // Settings configuration for the Nolte parser engine
     "verilog.compiler.linter": "verilator",
     "verilog.compiler.verilator.path": "/usr/local/bin/verilator",
-    "verilog.compiler.verilator.arguments": "--lint-only -Wall -I${workspaceFolder}/hw_ip/open_source_ip",
+    "verilog.compiler.verilator.arguments": "--lint-only -Wall -Werror -I${workspaceFolder}/hw_ip/components/pwm -I${workspaceFolder}/hw_ip/components/qei -I${workspaceFolder}/hw_ip/components/telemetry",
     "verilog.compiler.verilator.runAt": "onSave"
 }

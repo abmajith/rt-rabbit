@@ -5,8 +5,8 @@ TOPLEVEL_LANG = verilog
 
 # Point to both your top-level structure and the imported open-source IP folder
 VERILOG_SOURCES += $(shell pwd)/../rtl/rt_top.v
-VERILOG_SOURCES += $(shell pwd)/../open_source_ip/wb_pwm.v
-VERILOG_SOURCES += $(shell pwd)/../open_source_ip/wb_qei.v
+VERILOG_SOURCES += $(shell pwd)/../components/pwm/wb_pwm.v
+VERILOG_SOURCES += $(shell pwd)/../components/qei/wb_qei.v
 
 # Define top-level verilog structural wrapper block target name
 TOPLEVEL = rt_top
