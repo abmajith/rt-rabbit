@@ -45,7 +45,7 @@ class RTMultiAnalysis:
         multi_results = {}
         if self.scheduler == "EDF":
             _log.warning("EDF uses different schedulability analysis (Not FP-RTA)")
-            
+
         for core_id, analyzer in self.core_analyzers.items():
             core_results = {}
             for task in analyzer.tasks:
