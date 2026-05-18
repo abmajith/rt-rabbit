@@ -2,11 +2,16 @@
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, Timer
+import random
+
 from wb_driver import WishboneDriver
 
 
-async def step_quadrature_clockwise(dut, steps=1):
-    """Simulates a physical motor rotating forward by stepping channel pins"""
+# ==============================================================================
+# INDUSTRIAL TESTING APPX: CONCURRENT MOTOR SIMULATORS
+# ==============================================================================
+async def drive_clockwise_ticks(dut, steps=1):
+    """Simulates a motor spinning forward (A leads B)"""
     for _ in range(steps):
         dut.enc_a_pin.value = 1
         await Timer(100, unit="ns")
@@ -18,54 +23,92 @@ async def step_quadrature_clockwise(dut, steps=1):
         await Timer(100, unit="ns")
 
 
-@cocotb.test()
-async def test_encoder_tracking_verification(dut):
-    """Verify that our hardware safely tracks real-world motor spin directions"""
-    cocotb.start_soon(Clock(dut.sys_clk, 20, unit="ns").start())
+async def drive_counter_clockwise_ticks(dut, steps=1):
+    """Simulates a motor spinning backward (B leads A)"""
+    for _ in range(steps):
+        dut.enc_b_pin.value = 1
+        await Timer(100, unit="ns")
+        dut.enc_a_pin.value = 1
+        await Timer(100, unit="ns")
+        dut.enc_b_pin.value = 0
+        await Timer(100, unit="ns")
+        dut.enc_a_pin.value = 0
+        await Timer(100, unit="ns")
 
+
+async def read_hardware_position(dut, driver):
+    """Abstract helper to execute a synchronous Wishbone register read"""
+    await RisingEdge(dut.sys_clk)
+    dut.wb_adr.value = 4  # Base QEI Register Address Mapping Space
+    dut.wb_cyc.value = 1
+    dut.wb_stb.value = 1
+    dut.wb_we.value = 0  # Read mode operation
+
+    while not dut.wb_ack.value:
+        await RisingEdge(dut.sys_clk)
+
+    # Uses signed conversion since position can go negative when spinning backward!
+    captured_val = dut.wb_dat_r.value.to_signed()
+
+    dut.wb_cyc.value = 0
+    dut.wb_stb.value = 0
+    return captured_val
+
+
+# ==============================================================================
+# FULL-FLEDGED ADVANCED STRESS VERIFICATION
+# ==============================================================================
+@cocotb.test()
+async def test_encoder_bidirectional_random_fuzzing(dut):
+    """
+    Advanced Verification Suite: Stress-testing the QEI core
+    tracking accuracy across unpredictable, chaotic flight profiles.
+    """
+    cocotb.start_soon(Clock(dut.sys_clk, 20, unit="ns").start())
     driver = WishboneDriver(dut, clk_signal=dut.sys_clk, rst_signal=dut.sys_rst)
     await driver.reset_system()
 
-    # Ensure raw initial position lines are cleared
+    # Force physical pins to clean default ground lines
     dut.enc_a_pin.value = 0
     dut.enc_b_pin.value = 0
     await Timer(100, unit="ns")
 
-    target_ticks = 8
-    dut._log.info(
-        f"Physical Action: Rotating motor clockwise by {target_ticks} steps..."
-    )
-    await step_quadrature_clockwise(dut, steps=target_ticks)
+    # Ground Truth Tracking Variable
+    expected_software_position = 0
 
-    # Give the hardware debouncer a few clock cycles to process the final edge
-    await Timer(100, unit="ns")
+    dut._log.info("--- Initiating Bidirectional Chaos Fuzzing Loop ---")
 
-    # 4. Read back the position count register over the memory-mapped Wishbone bus
-    dut._log.info("Bus Action: Reading QEI counter register...")
-    # Base address for QEI is 4 because bit 2 is set high (100 in binary = 4)
-    await RisingEdge(dut.sys_clk)
-    dut.wb_adr.value = 4
-    dut.wb_cyc.value = 1
-    dut.wb_stb.value = 1
-    dut.wb_we.value = 0
+    # Run 30 random directional adjustments sequentially
+    for cycle in range(30):
+        # Constrained Random Choice: Spin CW or CCW? How many steps?
+        direction = random.choice(["CW", "CCW"])
+        random_steps = random.randint(1, 15)
 
-    # Wait for the hardware interface to acknowledge the read
-    while not dut.wb_ack.value:
-        await RisingEdge(dut.sys_clk)
+        if direction == "CW":
+            dut._log.info(f"Fuzz [{cycle}]: Spinning CLOCKWISE by {random_steps} steps")
+            await drive_clockwise_ticks(dut, steps=random_steps)
+            # 2x multiplier because the hardware updates counter twice per step cycle
+            expected_software_position += random_steps * 2
+        else:
+            dut._log.info(
+                f"Fuzz [{cycle}]: Spinning COUNTER-CLOCKWISE by {random_steps} steps"
+            )
+            await drive_counter_clockwise_ticks(dut, steps=random_steps)
+            expected_software_position -= random_steps * 2
 
-    captured_position = dut.wb_dat_r.value.integer
-    dut.wb_cyc.value = 0
-    dut.wb_stb.value = 0
+        # Give the hardware internal synchronizers time to stabilize
+        await Timer(100, unit="ns")
 
-    # 5. Core Verification Assertion
-    dut._log.info(
-        f"Verification Check: Hardware reports position = {captured_position}"
-    )
-    assert captured_position == target_ticks, (
-        f"VERIFICATION FAILURE: Hardware position mismatch! "
-        f"Expected {target_ticks}, got {captured_position}"
-    )
+        # Read back position over the bus to check tracking validity
+        hw_position = await read_hardware_position(dut, driver)
+        dut._log.info(
+            f"        -> Verification Check: HW={hw_position} | Expected={expected_software_position}"
+        )
 
-    dut._log.info(
-        "SUCCESS: Quadrature Encoder Interface tracking matches physics perfectly!"
-    )
+        # Core Functional Assertions
+        assert hw_position == expected_software_position, (
+            f"CRITICAL TRACKING FAILURE on cycle {cycle}! "
+            f"Hardware position skewed! Got {hw_position}, expected {expected_software_position}"
+        )
+
+    dut._log.info("SUCCESS: QEI core passed comprehensive verification fuzzing!")
