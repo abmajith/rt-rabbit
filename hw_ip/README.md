@@ -28,8 +28,8 @@ cd hw_ip/sim
 uv run make clean
 
 # Target PWM Fuzzing/Directed Simulation
-uv run make WAVES=1 MODULE=test_pwm_ip
+uv run make WAVES=1 MODULE=pwm
 
 # Target Quadrature Encoder Tracking
-uv run make WAVES=1 MODULE=test_qei_ip
+uv run make WAVES=1 MODULE=qei
 ```

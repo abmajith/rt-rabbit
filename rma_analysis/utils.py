@@ -1,8 +1,5 @@
 from typing import Optional
 import math
-import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
-from matplotlib.lines import Line2D
 from .task import Task
 
 

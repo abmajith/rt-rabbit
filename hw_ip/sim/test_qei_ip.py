@@ -7,70 +7,59 @@ import random
 from wb_driver import WishboneDriver
 
 
-# ==============================================================================
-# INDUSTRIAL TESTING APPX: CONCURRENT MOTOR SIMULATORS
-# ==============================================================================
 async def drive_clockwise_ticks(dut, steps=1):
     """Simulates a motor spinning forward (A leads B)"""
     for _ in range(steps):
-        dut.enc_a_pin.value = 1
+        dut.enc_a.value = 1
         await Timer(100, unit="ns")
-        dut.enc_b_pin.value = 1
+        dut.enc_b.value = 1
         await Timer(100, unit="ns")
-        dut.enc_a_pin.value = 0
+        dut.enc_a.value = 0
         await Timer(100, unit="ns")
-        dut.enc_b_pin.value = 0
+        dut.enc_b.value = 0
         await Timer(100, unit="ns")
 
 
 async def drive_counter_clockwise_ticks(dut, steps=1):
     """Simulates a motor spinning backward (B leads A)"""
     for _ in range(steps):
-        dut.enc_b_pin.value = 1
+        dut.enc_b.value = 1
         await Timer(100, unit="ns")
-        dut.enc_a_pin.value = 1
+        dut.enc_a.value = 1
         await Timer(100, unit="ns")
-        dut.enc_b_pin.value = 0
+        dut.enc_b.value = 0
         await Timer(100, unit="ns")
-        dut.enc_a_pin.value = 0
+        dut.enc_a.value = 0
         await Timer(100, unit="ns")
 
 
-async def read_hardware_position(dut, driver):
+async def read_hardware_position(dut):
     """Abstract helper to execute a synchronous Wishbone register read"""
-    await RisingEdge(dut.sys_clk)
-    dut.wb_adr.value = 4  # Base QEI Register Address Mapping Space
-    dut.wb_cyc.value = 1
-    dut.wb_stb.value = 1
-    dut.wb_we.value = 0  # Read mode operation
+    await RisingEdge(dut.wb_clk_i)
+    dut.wb_adr_i.value = 0  # Internal module address register 0
+    dut.wb_cyc_i.value = 1
+    dut.wb_stb_i.value = 1
+    dut.wb_we_i.value = 0
 
-    while not dut.wb_ack.value:
-        await RisingEdge(dut.sys_clk)
+    while not dut.wb_ack_o.value:
+        await RisingEdge(dut.wb_clk_i)
 
     # Uses signed conversion since position can go negative when spinning backward!
-    captured_val = dut.wb_dat_r.value.to_signed()
-
-    dut.wb_cyc.value = 0
-    dut.wb_stb.value = 0
+    captured_val = dut.wb_dat_o.value.to_signed()
+    dut.wb_cyc_i.value = 0
+    dut.wb_stb_i.value = 0
     return captured_val
 
 
-# ==============================================================================
-# FULL-FLEDGED ADVANCED STRESS VERIFICATION
-# ==============================================================================
 @cocotb.test()
 async def test_encoder_bidirectional_random_fuzzing(dut):
-    """
-    Advanced Verification Suite: Stress-testing the QEI core
-    tracking accuracy across unpredictable, chaotic flight profiles.
-    """
-    cocotb.start_soon(Clock(dut.sys_clk, 20, unit="ns").start())
-    driver = WishboneDriver(dut, clk_signal=dut.sys_clk, rst_signal=dut.sys_rst)
+    cocotb.start_soon(Clock(dut.wb_clk_i, 20, unit="ns").start())
+    driver = WishboneDriver(dut, clk_signal=dut.wb_clk_i, rst_signal=dut.wb_rst_i)
     await driver.reset_system()
 
     # Force physical pins to clean default ground lines
-    dut.enc_a_pin.value = 0
-    dut.enc_b_pin.value = 0
+    dut.enc_a.value = 0
+    dut.enc_b.value = 0
     await Timer(100, unit="ns")
 
     # Ground Truth Tracking Variable
@@ -100,7 +89,7 @@ async def test_encoder_bidirectional_random_fuzzing(dut):
         await Timer(100, unit="ns")
 
         # Read back position over the bus to check tracking validity
-        hw_position = await read_hardware_position(dut, driver)
+        hw_position = await read_hardware_position(dut)
         dut._log.info(
             f"        -> Verification Check: HW={hw_position} | Expected={expected_software_position}"
         )
@@ -111,4 +100,4 @@ async def test_encoder_bidirectional_random_fuzzing(dut):
             f"Hardware position skewed! Got {hw_position}, expected {expected_software_position}"
         )
 
-    dut._log.info("SUCCESS: QEI core passed comprehensive verification fuzzing!")
+    dut._log.info("SUCCESS: QEI block-level verification passed!")

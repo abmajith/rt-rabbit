@@ -302,7 +302,7 @@ class RTAnalysis:
     def print_rt_report(self):
         """Prints a clean summary of the system health."""
         _log.info("=" * 40)
-        _log.info(f"RT-RABBIT DESIGN REPORT")
+        _log.info("RT-RABBIT DESIGN REPORT")
         _log.info("=" * 40)
         _log.info(f"Overall CPU Utilization: {get_utility(self.tasks) * 100:.2f}%")
 
@@ -347,7 +347,7 @@ class RTAnalysis:
     def print_stress_report(self, context_switch_ms: float, jitter_ms: float):
         """Prints a report focused on hardware overhead and jitter."""
         _log.info("=" * 50)
-        _log.info(f"RT-RABBIT STRESS & FRAGILITY REPORT")
+        _log.info("RT-RABBIT STRESS & FRAGILITY REPORT")
         _log.info("=" * 50)
 
         stress_advice = self.get_stress_advice(context_switch_ms, jitter_ms)
