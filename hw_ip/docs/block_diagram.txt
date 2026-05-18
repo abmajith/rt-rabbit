@@ -1,0 +1,37 @@
+               ┌─────────────────────────────────────────────────────────┐
+               │                     PYTHON TESTBENCH                    │
+               │             (Master Bus Engine via cocotb)              │
+               └────────────────────────────┬────────────────────────────┘
+                                            │
+               Shared Wishbone Bus Signals  │ [sys_clk, sys_rst, wb_cyc, wb_stb, wb_we, wb_dat_w]
+             ┌──────────────────────────────┼──────────────────────────────┐
+             │                              │                              │
+             ▼                              ▼                              ▼
+     ┌───────────────┐              ┌───────────────┐              ┌───────────────┐
+     │ Address Line  │              │ Address Line  │              │  Address Bus  │
+     │  wb_adr[2]    │              │  wb_adr[2]    │              │  wb_adr[1:0]  │
+     └───────┬───────┘              └───────┬───────┘              └───────┬───────┘
+             │                              │                              │
+             │ = 0 (low)                    │ = 1 (high)                   │ Passed to both
+             ▼                              ▼                              ▼
+     ┌───────────────┐              ┌───────────────┐                      │
+     │  pwm_select   │              │  qei_select   │                      │
+     └───────┬───────┘              └───────┬───────┘                      │
+             │                              │                              │
+             ▼                              ▼                              ▼
+     ┌──────────────────────┐       ┌──────────────────────┐               │
+     │      wb_pwm.v        │       │      wb_qei.v        │               │
+     │  (Motor Controller)  │       │   (Wheel Tracker)    │               │
+     │                      │       │                      │               │
+     │ ◄────────────────────┼───────┼──────────────────────┼───────────────┘
+     │   [Internal Regs]    │       │   [Internal Regs]    │
+     │  0x0: reg_ctrl       │       │  0x4: position_count │
+     │  0x1: reg_period     │       │                      │
+     │  0x2: reg_duty       │       │                      │
+     └───────┬──────────────┘       └───────┬──────────────┘
+             │                              │
+             ▼ [pwm_pad_o]                  │ [enc_a, enc_b] ◄── (From Simulated Motor)
+     ┌──────────────────────┐               │
+     │  motor_pwm_pin       │               │
+     └──────────────────────┘               ▼
+                              [Reads position changes instantly]

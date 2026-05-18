@@ -10,3 +10,20 @@ rt_rabbit/__pycache__/
 # Build
 dist/
 build/
+
+# Block all Value Change Dump waveform trace captures recursively
+**/*.vcd
+
+# Block all cocotb XML test execution result matrices
+**/results.xml
+
+# Block all automated Verilator C++ build outputs and binary simulation executables
+**/sim_build/
+
+
+# ==============================================================================
+# Python Runtime Caches
+# ==============================================================================
+# Block all bytecode compilation caches recursively across any folder tree
+**/__pycache__/
+**/*.pyc
