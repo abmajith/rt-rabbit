@@ -1,7 +1,10 @@
-// hw_ip/rtl/rt_top_integrated.v
+`timescale 1ns/1ps
+
 module rt_top_integrated (
     input  wire        sys_clk,
+    /* verilator lint_off SYNCASYNCNET */
     input  wire        sys_rst,
+    /* verilator lint_on SYNCASYNCNET */
     
     // Shared Wishbone wires exposed to the simulation engine
     input  wire [2:0]  wb_adr,
