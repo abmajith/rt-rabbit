@@ -1,4 +1,3 @@
-import sys
 import yaml
 import argparse
 from rma_analysis.task import Task

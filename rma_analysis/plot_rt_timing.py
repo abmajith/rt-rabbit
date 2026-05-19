@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.ticker import MultipleLocator
 from .task import Task
-from .utils import get_utility
 
 
 def _draw_deadline_misses(

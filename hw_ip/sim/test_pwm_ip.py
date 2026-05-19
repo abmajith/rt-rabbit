@@ -6,18 +6,15 @@ import random
 from wb_driver import WishboneDriver
 
 
-# ==============================================================================
-# ROLE 1: DIRECTED SIMULATION (Timing and Frequency Metric Verification)
-# ==============================================================================
 @cocotb.test()
 async def test_scenario_directed_simulation(dut):
     """Scenario A: Standard simulation targeting static speed metrics."""
 
     # 1. Fire up the shared infrastructure clock engine
-    cocotb.start_soon(Clock(dut.sys_clk, 20, unit="ns").start())
+    cocotb.start_soon(Clock(dut.wb_clk_i, 20, unit="ns").start())
 
     # 2. Instantiate our modular driver interface
-    driver = WishboneDriver(dut, clk_signal=dut.sys_clk, rst_signal=dut.sys_rst)
+    driver = WishboneDriver(dut, clk_signal=dut.wb_clk_i, rst_signal=dut.wb_rst_i)
     await driver.reset_system()
 
     dut._log.info("Executing directed configuration sequence...")
@@ -30,15 +27,15 @@ async def test_scenario_directed_simulation(dut):
     # ==========================================================================
     dut._log.info("Measuring physical PWM output wave metrics...")
     # Wait for the start of Cycle 1
-    await RisingEdge(dut.motor_pwm_pin)
+    await RisingEdge(dut.pwm_pad_o)
     t_rise1 = cocotb.utils.get_sim_time(unit="ns")
 
     # Wait for the falling edge (end of high time)
-    await FallingEdge(dut.motor_pwm_pin)
+    await FallingEdge(dut.pwm_pad_o)
     t_fall = cocotb.utils.get_sim_time(unit="ns")
 
     # Wait for the start of Cycle 2 (completion of a full period)
-    await RisingEdge(dut.motor_pwm_pin)
+    await RisingEdge(dut.pwm_pad_o)
     t_rise2 = cocotb.utils.get_sim_time(unit="ns")
 
     # Calculate intervals
@@ -67,28 +64,12 @@ async def test_scenario_directed_simulation(dut):
     dut._log.info("Directed simulation completed successfully.")
 
 
-"""
-    
-    # Measure the resulting physical outputs to check accuracy
-    await RisingEdge(dut.motor_pwm_pin)
-    t_start = cocotb.utils.get_sim_time(unit="ns")
-    await FallingEdge(dut.motor_pwm_pin)
-    t_end = cocotb.utils.get_sim_time(unit="ns")
-    
-    assert (t_end - t_start) == (125 * 20), "Directed simulation timing verification failed!"
-    dut._log.info("Directed simulation completed successfully.")
-"""
-
-
-# ==============================================================================
-# ROLE 2: RANDOM VERIFICATION (Stress Fuzzing and Safety Guard Checks)
-# ==============================================================================
 @cocotb.test()
 async def test_scenario_random_verification(dut):
     """Scenario B: Stress test the hardware core against random robotic input profiles."""
 
-    cocotb.start_soon(Clock(dut.sys_clk, 20, unit="ns").start())
-    driver = WishboneDriver(dut, clk_signal=dut.sys_clk, rst_signal=dut.sys_rst)
+    cocotb.start_soon(Clock(dut.wb_clk_i, 20, unit="ns").start())
+    driver = WishboneDriver(dut, clk_signal=dut.wb_clk_i, rst_signal=dut.wb_rst_i)
     await driver.reset_system()
 
     await driver.write_reg(address=0x01, data=200)  # Base Period Window = 200 ticks
@@ -102,17 +83,17 @@ async def test_scenario_random_verification(dut):
         await driver.write_reg(address=0x02, data=target_speed)
 
         # --- Wait 1 clock edge for the register assignment to hit the pin! ---
-        await RisingEdge(dut.sys_clk)
+        await RisingEdge(dut.wb_clk_i)
         # Run the simulation engine for 1 complete PWM wave frame to verify response
         for _ in range(200):
-            await RisingEdge(dut.sys_clk)
+            await RisingEdge(dut.wb_clk_i)
 
             # Real-time hardware assertion monitoring
             if target_speed == 0:
-                assert dut.motor_pwm_pin.value == 0, (
+                assert dut.pwm_pad_o.value == 0, (
                     "Safety Bug: Motor active during 0 speed lock!"
                 )
             if target_speed >= 200:
-                assert dut.motor_pwm_pin.value == 1, (
+                assert dut.pwm_pad_o.value == 1, (
                     "Safety Bug: Wave glitched out during over-throttle saturation!"
                 )
