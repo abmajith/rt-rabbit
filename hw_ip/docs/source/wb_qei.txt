@@ -1,0 +1,137 @@
+=== wb_qei ===
+
+                     WISHBONE B4 INTERCONNECT
+  +---------------------------------------------------------------+
+  |                                                               |
+  |   wb_clk_i   wb_rst_i    wb_adr_i[1:0]  wb_dat_i[]  wb_we_i   |
+  +------+------------+-----------+------------+-----------+------+
+         |            |           |            |           |
+         v            v           v            v           v
+  +-------------------------------------------------------------+
+  |               BUS INTERFACE & ADDRESS DECODER               |
+  +------+--------------------+--------------------+------------+
+         |                    |                    |
+         v [Addr: 2'b00]      v [Addr: 2'b01]      v [Addr: 2'b1x]
+  +--------------+     +--------------+     +--------------+
+  | reg_position |     |   reg_ctrl   |     |   Reserved   |
+  |              |     | [31:1] Unused|     |              |
+  |  (32-bit s)  |     | [0]   ENABLE |     |   (Unmapped) |
+  +------+-------+     +------+-------+     +--------------+
+         ^                    | 
+         | (Bi-directional)   | (Bit 0 Only)
+         v                    v
+  +-------------------------------------------------------------+
+  |                QUADRATURE ENCODER CORE ENGINE               |
+  |                                                             |
+  |   Metastability & Filter Pipeline:                          |
+  |     - shift_a[2:0] <= {shift_a[1:0], enc_a_pad_i}          |
+  |     - shift_b[2:0] <= {shift_b[1:0], enc_b_pad_i}          |
+  |                                                             |
+  |   If ENABLE == 1:                                           |
+  |     - Evaluates synchronized Channel A edge transformations|
+  |     - Samples Channel B phase state to establish direction  |
+  |     - Updates signed 32-bit position accumulator tracking   |
+  +---------------------------------+---------------------------+
+                                    ^
+                                    |
+                        +-----------+-----------+
+                        |                       |
+                  enc_a_pad_i             enc_b_pad_i
+                        ^                       ^
+                        |                       |
+                [Physical Pin In]       [Physical Pin In]
+
+
+
+=== rt_qei_top (Top-Level Wrapper) ===
+ 
+      [Wishbone Interconnect Inputs]
+       sys_clk  --------+------------------------------------+
+       sys_rst  --------|----+                               |
+       wb_adr   --------|----|----+                          |
+       wb_dat_w --------|----|----|----+                     |
+       wb_we    --------|----|----|----|----+                |
+       wb_stb   --------|----|----|----|----|----+           |
+       wb_cyc   --------|----|----|----|----|----|----+      |
+                        |    |    |    |    |    |    |      |
+                        v    v    v    v    v    v    v      v
+                 +-----------------------------------------------+
+                 |  .wb_clk_i  .wb_adr_i   .wb_we_i   .wb_cyc_i |
+                 |  .wb_rst_i  .wb_dat_i   .wb_stb_i            |
+                 |                                               |
+                 |              === wb_qei (Core) ===            |
+                 |                                               |
+                 |   +--------------+  +--------------+          |
+                 |   | bus_write_en |  |  bus_read_en |          |
+                 |   +--------------+  +--------------+          |
+                 |          |                  |                 |
+                 |          v                  v                 |
+                 |   +------------------------------------+      |
+                 |   |            Register File           |      |
+                 |   |  0x00: reg_position (Signed 32b)   |      |
+                 |   |  0x01: reg_ctrl     [0]=Enable     |      |
+                 |   +------------------------------------+      |
+                 |                             ^                 |
+                 |                             |                 |
+                 |   +------------------------------------+      |
+                 |   |     Quadrature Decoder Engine      |      |
+                 |   |  - 3-Stage Metastability Shifters  |      |
+                 |   |  - Directional Tracking Logic      |      |
+                 |   +------------------------------------+      |
+                 |         ^                        ^            |
+                 |         |                        |            |
+                 |    .enc_a_pad_i             .enc_b_pad_i      |
+                 +-----------------------------------------------+
+                           ^                        ^
+                           |                        |
+                    motor_encoder_a          motor_encoder_b ---> [Physical Pins In]
+
+
+Bus Handshake & Read/Write Protocols
+    Zero-Wait-State Acknowledge: 
+    The core asserts wb_ack_o exactly 1 clock cycle following a valid cycle qualification:
+        $$\text{bus\_write\_en} = \text{wb\_cyc\_i} \cdot \text{wb\_stb\_i} \cdot \text{wb\_we\_i} \cdot \overline{\text{wb\_ack\_o}}$$
+        $$\text{bus\_read\_en} = \text{wb\_cyc\_i} \cdot \text{wb\_stb\_i} \cdot \overline{\text{wb\_we\_i}} \cdot \overline{\text{wb\_ack\_o}}$$
+
+    Bus Deadlock Prevention: 
+    Because wb_ack_o clears unconditionally on the clock cycle following an assertion, the peripheral cannot stall or hang the system crossbar interconnect.
+
+    Default Slicing Safety & Unmapped Reads: 
+    If unmapped addresses (2'b10 or 2'b11) are requested during a Read command, the data bus safely squashes output leakage by returning 32'd0 explicitly.
+
+    CPU Hardware Override:
+    The tracking accumulator supports active runtime presets. Software can clear index position tracking or write an explicit offset directly into reg_position at any cycle, taking immediate priority over raw encoder ticks.
+
+
+Hardware Tracking & Synchronization Engine
+The core features a parallelized 3-stage shift pipeline to guard against metastability and coordinate sample timing perfectly:
+
+    Metastability Immunity Link: 
+    Raw pin inputs pass through a multi-stage flip-flop buffer before evaluation:
+        $$\text{shift\_a}_n = \{\text{shift\_a}_{n-1}[1:0], \, \text{enc\_a\_pad\_i}\}$$
+        $$\text{shift\_b}_n = \{\text{shift\_b}_{n-1}[1:0], \, \text{enc\_b\_pad\_i}\}$$
+
+    Phase Edge Alignment Criteria: 
+    Direction decoding is locked to Channel A transitions to prevent jitter count bloat:
+        $$\text{a\_rose} = (\text{shift\_a}[2:1] == 2'\text{b01})$$
+        $$\text{a\_fell} = (\text{shift\_a}[2:1] == 2'\text{b10})$$
+
+    Directional Sign Resolution:
+    When a valid transition is confirmed on Channel A, Channel B's synchronized midpoint state resolves the step vector:
+        $$\text{Count Step} = \begin{cases} +1 & \text{if } (\text{a\_rose} \cdot \overline{\text{shift\_b}[1]}) + (\text{a\_fell} \cdot \text{shift\_b}[1]) \\ -1 & \text{if } (\text{a\_rose} \cdot \text{shift\_b}[1]) + (\text{a\_fell} \cdot \overline{\text{shift\_b}[1]}) \end{cases}$$
+
+
+Stratified Verification Strategy Matrix
+
+The Cocotb environment validates this core through a multi-layered verification approach:
+
++------------------------------------------------------------------------+
+| LAYER 3: Random Boundary Fuzzing                                       |
+| -> Simulates fast directional phase reversals and high-speed skews    |
++------------------------------------------------------------------------+
+| LAYER 2: Functional Assertions                                         |
+| -> Checks 32-bit two's complement sign wrapping and CPU preset writes |
++------------------------------------------------------------------------+
+| LAYER 1: Protocol Compliance                                           |
+| -> Monitors single-cycle write/readbacks over the Wishbone interface   |
++------------------------------------------------------------------------+

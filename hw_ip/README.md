@@ -27,14 +27,20 @@ Ensure your project virtual environment context is loaded via `uv`:
 cd hw_ip/sim
 
 # Target PWM Fuzzing/Directed Simulation
-uv run make clean && uv run make WAVES=1 MODULE=pwm
+uv run sh -c "make clean && make TARGET=pwm_unit"
 
 # Target Quadrature Encoder Tracking
 uv run make clean && uv run make WAVES=1 MODULE=qei
+uv run sh -c "make clean && make TARGET=qei_unit"
 
 # Target the telemetry
-uv run make clean && uv run make WAVES=1 TARGET=telemetry
+uv run sh -c "make clean && make TARGET=telemetry"
 
 # Target top 
-uv run make clean && uv run make WAVES=1 TARGET=top
+uv run sh -c "make clean && make TARGET=top"
+
+# telemetry wishbone specification
+ uv run sh -c "make clean && make TARGET=wb_telemetry"
+  uv run sh -c "make clean && make TARGET=telemetry_rx"
+   uv run sh -c "make clean && make TARGET=telemetry_tx"
 ```

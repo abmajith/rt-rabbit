@@ -1,10 +1,10 @@
-# hw_ip/sim/test_qei_ip.py
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge, Timer
+from cocotb.triggers import Timer
 import random
 
 from wb_driver import WishboneDriver
+from wb_assertions import WishboneProtocolAsserter
 
 
 async def drive_clockwise_ticks(dut, steps=1):
@@ -33,27 +33,15 @@ async def drive_counter_clockwise_ticks(dut, steps=1):
         await Timer(100, unit="ns")
 
 
-async def read_hardware_position(dut):
-    """Abstract helper to execute a synchronous Wishbone register read"""
-    await RisingEdge(dut.wb_clk_i)
-    dut.wb_adr_i.value = 0  # Internal module address register 0
-    dut.wb_cyc_i.value = 1
-    dut.wb_stb_i.value = 1
-    dut.wb_we_i.value = 0
-
-    while not dut.wb_ack_o.value:
-        await RisingEdge(dut.wb_clk_i)
-
-    # Uses signed conversion since position can go negative when spinning backward!
-    captured_val = dut.wb_dat_o.value.to_signed()
-    dut.wb_cyc_i.value = 0
-    dut.wb_stb_i.value = 0
-    return captured_val
-
-
 @cocotb.test()
 async def test_encoder_bidirectional_random_fuzzing(dut):
+    # Initialize 50MHz test clock line (20ns period)
     cocotb.start_soon(Clock(dut.wb_clk_i, 20, unit="ns").start())
+
+    # 2. fire up the protocol checker
+    protocol_checker = WishboneProtocolAsserter(dut, dut.wb_clk_i)
+    cocotb.start_soon(protocol_checker.start_monitoring())
+    # Connect standard verified Driver class
     driver = WishboneDriver(dut, clk_signal=dut.wb_clk_i, rst_signal=dut.wb_rst_i)
     await driver.reset_system()
 
@@ -69,14 +57,13 @@ async def test_encoder_bidirectional_random_fuzzing(dut):
 
     # Run 30 random directional adjustments sequentially
     for cycle in range(30):
-        # Constrained Random Choice: Spin CW or CCW? How many steps?
         direction = random.choice(["CW", "CCW"])
         random_steps = random.randint(1, 15)
 
         if direction == "CW":
             dut._log.info(f"Fuzz [{cycle}]: Spinning CLOCKWISE by {random_steps} steps")
             await drive_clockwise_ticks(dut, steps=random_steps)
-            # 2x multiplier because the hardware updates counter twice per step cycle
+            # Hardware updates counter twice per step cycle (A rising and A falling)
             expected_software_position += random_steps * 2
         else:
             dut._log.info(
@@ -88,8 +75,16 @@ async def test_encoder_bidirectional_random_fuzzing(dut):
         # Give the hardware internal synchronizers time to stabilize
         await Timer(100, unit="ns")
 
-        # Read back position over the bus to check tracking validity
-        hw_position = await read_hardware_position(dut)
+        # Read back position over the bus using your centralized driver framework
+        # Target address 0x00 (QEI Position Tracker Register)
+        raw_hw_val = await driver.read_reg(address=0)
+
+        # Explicit sign extension block for 32-bit two's complement handling
+        if raw_hw_val & (1 << 31):
+            hw_position = raw_hw_val - (1 << 32)
+        else:
+            hw_position = raw_hw_val
+
         dut._log.info(
             f"        -> Verification Check: HW={hw_position} | Expected={expected_software_position}"
         )
@@ -100,4 +95,17 @@ async def test_encoder_bidirectional_random_fuzzing(dut):
             f"Hardware position skewed! Got {hw_position}, expected {expected_software_position}"
         )
 
-    dut._log.info("SUCCESS: QEI block-level verification passed!")
+    dut._log.info("--- Testing CPU Position Reset/Preset Override ---")
+    # Test writing a preset value back into the tracker using our driver framework
+    preset_test_val = 500
+    await driver.write_reg(address=0, data=preset_test_val)
+    await Timer(100, unit="ns")
+
+    verify_preset = await driver.read_reg(address=0)
+    assert verify_preset == preset_test_val, (
+        f"Register Write Failed! Expected {preset_test_val}, got {verify_preset}"
+    )
+
+    dut._log.info(
+        "SUCCESS: QEI block-level verification passed cleanly with WishboneDriver!"
+    )

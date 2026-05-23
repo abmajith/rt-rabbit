@@ -1,4 +1,3 @@
-// hw_ip/open_source_ip/wb_pwm.v
 // A standard Open-Source Wishbone-attached PWM Peripheral
 
 module wb_pwm (
@@ -28,7 +27,7 @@ module wb_pwm (
     // Internal Simulation Counter
     reg [31:0] pwm_counter;
 
-    // --- Part A: Wishbone Bus Interface Logic ---
+    // --- Wishbone Bus Interface Logic
     wire bus_write_en = wb_cyc_i && wb_stb_i && wb_we_i && !wb_ack_o;
     wire bus_read_en  = wb_cyc_i && wb_stb_i && !wb_we_i && !wb_ack_o;
 
@@ -65,7 +64,7 @@ module wb_pwm (
         end
     end
 
-    // --- Part B: Hardware PWM Signal Generation Core ---
+    // --- Hardware PWM Signal Generation Core ---
     always @(posedge wb_clk_i) begin
         if (wb_rst_i) begin
             pwm_counter <= 32'd0;

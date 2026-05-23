@@ -1,0 +1,128 @@
+=== wb_pwm  ===
+
+                     WISHBONE B4 INTERCONNECT
+  +---------------------------------------------------------------+
+  |                                                               |
+  |   wb_clk_i     wb_rst_i    wb_adr_i[1:0]  wb_dat_i[]  wb_we_i |
+  +------+------------+-----------+------------+-----------+------+
+         |            |           |            |           |
+         v            v           v            v           v
+  +-------------------------------------------------------------+---------------+
+  |               BUS INTERFACE & ADDRESS DECODER                               |
+  +------+--------------------+--------------------+------------+--------+------+
+         |                    |                    |                     | 
+         v [Addr: 2'b00]      v [Addr: 2'b01]      v [Addr: 2'b10]       v [Addr: 2'b11]
+  +--------------+     +--------------+     +--------------+         +---------------+
+  |   reg_ctrl   |     |  reg_period  |     |   reg_duty   |         |   Reserved    |
+  | [31:1] Unused|     |              |     |              |         |               |
+  | [0]    ENABLE|     |   (32-bit)   |     |   (32-bit)   |         |   (Unmapped)  |
+  +------+-------+     +------+-------+     +------+-------+         +---------------+
+         |                    |                    |
+         | (Bit 0 Only)       |                    |
+         v                    v                    v
+  +-------------------------------------------------------------+
+  |                     PWM GENERATION ENGINE                   |
+  |                                                             |
+  |   If ENABLE == 1:                                           |
+  |     pwm_counter loops from 0 to (reg_period - 1)            |
+  |                                                             |
+  |   Defensive Comparator Stage:                               |
+  |     - If duty == 0      ---> Force 0                        |
+  |     - If duty >= period ---> Force 1                        |
+  |     - Else              ---> (pwm_counter < reg_duty)       |
+  +-------------------------------------+-----------------------+
+                                        |
+                                        v
+                                    pwm_pad_o
+
+
+
+
+
+=== rt_pwm_top (Top-Level Wrapper) ===
+ 
+      [Wishbone Interconnect Inputs]
+       sys_clk  --------+------------------------------------+
+       sys_rst  --------|----+                               |
+       wb_adr   --------|----|----+                          |
+       wb_dat_w --------|----|----|----+                     |
+       wb_we    --------|----|----|----|----+                |
+       wb_stb   --------|----|----|----|----|----+           |
+       wb_cyc   --------|----|----|----|----|----|----+      |
+                        |    |    |    |    |    |    |      |
+                        v    v    v    v    v    v    v      v
+                 +-----------------------------------------------+
+                 |  .wb_clk_i   .wb_adr_i   .wb_we_i   .wb_cyc_i |
+                 |  .wb_rst_i   .wb_dat_i   .wb_stb_i            |
+                 |                                               |
+                 |             === wb_pwm (Core) ===             |
+                 |                                               |
+                 |   +--------------+  +--------------+          |
+                 |   | bus_write_en |  |  bus_read_en |          |
+                 |   +--------------+  +--------------+          |
+                 |          |                 |                  |
+                 |          v                 v                  |
+                 |   +------------------------------------+      |
+                 |   |           Register File            |      |
+                 |   |  0x00: reg_ctrl   [0]=Enable       |      |
+                 |   |  0x01: reg_period (Default: 1000)  |      |
+                 |   |  0x02: reg_duty   (Default: 0)     |      |
+                 |   +------------------------------------+      |
+                 |                            |                  |
+                 |                            v                  |
+                 |   +------------------------------------+      |
+                 |   |      PWM Generation Core Engine    |      |
+                 |   |   - 32-bit Internal Counter        |      |
+                 |   |   - Defensively Saturated Core     |      |
+                 |   +------------------------------------+      |
+                 |                     |                         |
+                 |                     v                         |
+                 |                .pwm_pad_o                     |
+                 +-----------------------------------------------+
+                                       |
+                                       v
+                                 motor_pwm_pin -----> [Physical Pin Out]
+
+
+Bus Handshake & Read/Write Protocols
+    Zero-Wait-State Acknowledge: 
+    The core asserts wb_ack_o exactly $1$ clock cycle following a valid cycle qualification:
+        $$\text{bus\_write\_en} = \text{wb\_cyc\_i} \cdot \text{wb\_stb\_i} \cdot \text{wb\_we\_i} \cdot \overline{\text{wb\_ack\_o}}$$
+        $$\text{bus\_read\_en} = \text{wb\_cyc\_i} \cdot \text{wb\_stb\_i} \cdot \overline{\text{wb\_we\_i}} \cdot \overline{\text{wb\_ack\_o}}$$
+
+    Bus Deadlock Prevention: 
+    Because wb_ack_o clears unconditionally on the clock cycle following an assertion 
+    (unless a brand new transaction qualifies on the exact same edge), the peripheral cannot stall or hang the system crossbar interconnect.
+
+    Default Slicing Safety: 
+    If unmapped addresses (2'b11) are requested during a Read command, 
+    the data bus safely squashes output leakage by returning 32'd0 explicitly.
+
+Defensive Hardware Saturation Engine
+The core features a built-in protection system inside its comparator module to completely prevent clock 
+wrap-around glitches or short-pulse hazards when parameters cross over during runtime:
+
+    Absolute $0\%$ Clamp State: When reg_duty == 32'd0, the output bit pwm_pad_o is completely latched down to 1'b0. 
+    This holds true even if the internal counter rolls over or resets, eliminating partial or transient pulses at zero speed.
+    
+    Absolute $100\%$ Clamp State: When reg_duty >= reg_period, the logic forces an absolute override, locking pwm_pad_o to a continuous 1'b1. 
+    This guarantees clean DC saturation without dropping the line low for a single clock cycle at max speed.
+    
+    Period Boundary Alignment: The pulse counter wraps exactly at the count boundary:$$\text{Max Count} = \text{reg\_period} - 1$$
+    This ensures the wave duration matches your expected mathematical frequency precisely, without adding an extra trailing clock cycle overhead.
+
+
+Stratified Verification Strategy Matrix
+
+The Cocotb environment validates this core through a multi-layered verification approach:
+
++------------------------------------------------------------------------+
+| LAYER 3: Random Boundary Fuzzing                                       |
+| -> Mutates parameters mid-cycle to catch timing/glitch anomalies       |
++------------------------------------------------------------------------+
+| LAYER 2: Functional Assertions                                         |
+| -> Checks 0% and 100% saturation limits for smooth clamping            |
++------------------------------------------------------------------------+
+| LAYER 1: Protocol Compliance                                           |
+| -> Monitors single-cycle write/readbacks over the Wishbone interface   |
++------------------------------------------------------------------------+
