@@ -1,0 +1,285 @@
+=== wb_telemetry Subsystem Specification ===
+
+                    WISHBONE B4 INTERCONNECT
+  +---------------------------------------------------------------+
+  |                                                               |
+  |   wb_clk_i     wb_rst_i    wb_adr_i[1:0]  wb_dat_i[]  wb_we_i |
+  +------+------------+-----------+------------+-----------+------+
+         |            |           |            |           |
+         v            v           v            v           v
+  +-------------------------------------------------------------+---------------+
+  |               BUS INTERFACE & ADDRESS DECODER                               |
+  +------+--------------------+--------------------+------------+--------+------+
+         |                    |                    |                     | 
+         v [Addr: 2'b00]      v [Addr: 2'b01]      v [Addr: 2'b10]       v [Addr: 2'b11]
+  +--------------+     +--------------+     +--------------+     +---------------+
+  | reg_mimo_mode|     | voted_cmd    |     |  reg_tx_data |     | Sticky Status |
+  | [31:2] Unused|     |     _cache   |     |              |     | [31:5] Unused |
+  | [1:0] MODE   |     |   (32-bit)   |     |   (32-bit)   |     | [4] STICKY_VL |
+  |              |     |              |     |              |     | [3:0] RX_STAT |
+  +------+-------+     +------+-------+     +------+-------+     +---------------+
+         |                    ^                    |
+         | (Config Control)   | (Latched Readback) | (Payload Injection)
+         v                    |                    v
+  +---------------------------+--------------------+-----------------------------+
+  |                   TELEMETRY CORE PROCESSING LAYER                            |
+  |                                                                              |
+  |   [Submodule: telemetry_rx]                     [Submodule: telemetry_tx]    |
+  |   - Dual-Ch Voting State Machine                - Periodic Strobe Generator  |
+  |   - Multi-Cycle Skew Watchdog Timer             - Hardware Counter Engine    |
+  |   - Anti-Chatter Pulse Filters                  - Target Limit Counter       |
+  +------------------------------------------------------------------------------+
+
+
+  === rt_wb_telemetry_top (Subsystem Architecture) ===
+       [Wishbone Interconnect Inputs]
+       wb_clk_i  --------+------------------------------------------+
+       wb_rst_i  --------|----+                                     |
+       wb_adr_i  --------|----|----+                                |
+       wb_dat_i  --------|----|----|----+                           |
+       wb_we_i   --------|----|----|----|----+                      |
+       wb_stb_i  --------|----|----|----|----|----+                 |
+       wb_cyc_i  --------|----|----|----|----|----|----+           |
+                         |    |    |    |    |    |    |           |
+                         v    v    v    v    v    v    v           v
+                  +-----------------------------------------------------+
+                  |   .wb_clk_i   .wb_adr_i   .wb_we_i   .wb_cyc_i      |
+                  |   .wb_rst_i   .wb_dat_i   .wb_stb_i                 |
+                  |                                                     |
+                  |               === wb_telemetry ===                  |
+                  |                                                     |
+                  |       +-----------------+   +-----------------+     |
+                  |       |  telemetry_rx   |   |  telemetry_tx   |     |
+                  |       +-----------------+   +-----------------+     |
+                  |                |                     |              |
+                  |                v                     v              |
+                  |     [Staging Memory Layer]           |              |
+                  |     - reg_voted_cmd_cache            |              |
+                  |     - reg_voted_valid_sticky         |              |
+                  |                                      |              |
+                  +-----------------------------------------------------+
+                                   |                     |
+                                   v                     v
+                             [Hardware RX]         [Hardware TX]
+                             rx_channel_1/2        tx_raw_stream
+                             rx_ch1/2_ready        tx_start_pulse
+
+
+Core Operational Engines
+1. Dual-Channel Voting Architecture (telemetry_rx)
+The receiver uses an edge-detecting front end to extract incoming ready strobes 
+(rx_ch1_ready, rx_ch2_ready), decoupling processing pipelines from external 
+signal bounce or extended assertions.
+
+-   Skew Watchdog Timer: Upon detecting data on one channel without its pair, 
+    a hardware watchdog window opens, tracking skew up to MAX_SKEW_DELAY clock cycles.
+
+-   MIMO Real-Time Voter: If both channels arrive within the window, 
+    their data layers are evaluated. If they match precisely, 
+    data is accepted and a status code is returned:
+        $$\text{Data Match Vector} = \text{4'b0011}$$
+        $$\text{Contradiction Failure Vector} = \text{4'b1100}$$
+
+-   Dynamic Fallback Modes: Software can change spatial redundancy rules on the 
+    fly via the reg_mimo_mode register:
+    -   2'b00: Strict Spatial Majority (drops asymmetrical packets on timeout).
+    -   2'b01: Fallback to Channel 1 (accepts Ch1 data alone if Ch2 drops).
+    -   2'b10: Fallback to Channel 2 (accepts Ch2 data alone if Ch1 drops).
+
+2. Time-Triggered Streaming Generator (telemetry_tx)
+The transmitter runs an autonomous periodic execution loop. It counts up to MAX_COUNT to maintain precise 
+time-triggered scheduling without CPU overhead. When the timer expires, it loads reg_tx_data onto 
+the tx_raw_stream lines and issues a single-cycle strobe (tx_start_pulse). 
+This isolates the external physical data stream from any real-time variations in CPU register updates.
+
+
+Bus Handshake & Read/Write Protocols
+Zero-Wait-State Acknowledge
+The core evaluates and qualifies Wishbone cycles instantly, 
+asserting wb_ack_o exactly 1 clock cycle following a valid strobe phase:
+        $$\text{bus\_select} = \text{wb\_cyc\_i} \cdot \text{wb\_stb\_i}$$
+
+
+Sticky Clear-on-Read (COR) Status Engine
+To ensure that slow embedded processors running low-frequency polling loops do not drop transient hardware status actions, 
+single-cycle validation pulses are securely captured using a state-retaining register:
+-   Hardware Set Phase: When the dual-channel voting hardware yields a matching payload, 
+    internal_voted_valid pulses high for 1 cycle, 
+    locking the caching structures:
+        $$\text{reg\_voted\_valid\_sticky} \Leftarrow \text{1'b1}$$
+        $$\text{reg\_voted\_cmd\_cache} \Leftarrow \text{internal\_voted\_cmd}$$
+
+-   Bus Clearance Phase: The software acknowledges the packet event by reading the status 
+    register at address 2'b11. On the exact clock cycle where the master samples the data 
+    and the handshake finishes, the bit is cleared automatically:
+        $$\text{Clear Conditions} = \text{bus\_select} \cdot \overline{\text{wb\_we\_i}} \cdot (\text{wb\_adr\_i} == \text{2'b11}) \cdot \text{wb\_ack\_o}$$
+
+
+Default Fallback Slicing
+To protect internal register spaces from software decoding errors, writing to unmapped spaces (2'b01 or 2'b11) is ignored, 
+while unmapped read addresses safely clear output bus leakage by forcing a zero value (32'h0) onto wb_dat_o.
+
+Verification Suite Test Case Summary
+Test Case Name                      Target Module           Verification Intent
+test_tx_periodic_strobe             telemetry_tx    Verifies that the transmitter fires at cycle-accurate intervals 
+                                                    ($MAX\_COUNT + 1$) and maps the payload data correctly.
+test_tx_payload_latching            telemetry_tx    Confirms mid-cycle data changes do not leak onto the 
+                                                    output stream until the timer interval expires.
+test_symmetric_skew_ch2_leads_ch1   telemetry_rx    Validates that an early arrival on Channel 2 caches 
+                                                    correctly and waits for Channel 1 to complete a match 
+                                                    within the allowed skew window.
+test_corner_watchdog_timeout_ch1    telemetry_rx    Asserts that in Strict Mode (2'b00), isolated channels are 
+                                                    dropped and flag a timeout error if the pair fails to arrive.
+test_corner_mimo_fallback_ch1       telemetry_rx    Verifies that switching to Mode 2'b01 allows isolated Channel 1 
+                                                    packets through once the watchdog window expires.
+test_corner_data_contradiction      telemetry_rx    Injects valid, simultaneous ready pulses with mismatched payload 
+                                                    values to guarantee malicious or corrupted packets are blocked.
+test_corner_chatter_retrigger       telemetry_rx    Injects a secondary faulty ready pulse on an already-open channel 
+                                                    to ensure the edge-detection logic prevents system deadlocks.
+test_wb_telemetry_integration       wb_telemetry    End-to-end SoC test: verifies Wishbone register configuration, 
+                                                    confirms the Clear-on-Read function of bit [4], 
+                                                    and tracks system data coherence.
+
+
+Sub-Systems
+=== telemetry_tx  ===
+           +---------------------------------------------+
+           |               telemetry_tx                  |
+           +---------------------------------------------+
+                                  |
+               +------------------+------------------+
+               | (If Counter < MAX_COUNT)            | (If Counter >= MAX_COUNT)
+               v                                     v
+   +-----------------------+             +-----------------------+
+   |  tx_timer_counter++   |             | tx_timer_counter <= 0 |
+   |  tx_start_pulse <= 0  |             | tx_start_pulse  <= 1 |
+   +-----------------------+             | tx_raw_stream   <=    |
+                                         |      tx_payload_data  |
+                                         +-----------------------+
+
+Internal Hardware Mechanics
+
+The telemetry_tx block acts as a decoupled time-triggered boundary. 
+It eliminates real-time jitter from the CPU by running an independent counter wheel:
+
+-   The Counter Wheel: Increments on every clk edge. It prevents mid-cycle configuration 
+    changes from tearing or corrupting data packets by sampling tx_payload_data only 
+    at the exact clock edge where tx_start_pulse fires.
+
+-   Period Boundary Calculation: The overall period between transmission pulses equals exactly:
+        $$\text{Period} = \text{MAX\_COUNT} + 1 \text{ clock cycles}$$
+
+Dedicated Transmitter Unit Test Assertions
+The test_telemetry_tx.py suite enforces architectural safety using three functional assertions:
+
+-   Cycle-Accurate Period Check (test_tx_periodic_strobe): Tracks time from the falling edge 
+    of one strobe to the rising edge of the next. Asserts that the delta is exactly matching 
+    the configuration constraint to protect down-stream radio links from channel crowding.
+
+-   Anti-Leakage Data Latching Check (test_tx_payload_latching): Mutates the input payload 
+    register midway through the counting phase (e.g., at cycle 10). Asserts that tx_raw_stream 
+    retains its historic value and does not track the input wire until the strobe occurs.
+
+-   Mid-Flight Zeroization Check (test_tx_reset_behavior): Forces rst high mid-way through counting 
+    to confirm that the counter wheel drops to 0 instantly and suppresses any partial 
+    or malformed strobe output.
+
+
+=== telemetry_rx  ===
+
+        CHANNEL 1                                                    CHANNEL 2
+  rx_ch1_ready ---> [Edge Pulse] ----+            +---- [Edge Pulse] <--- rx_ch2_ready
+  rx_channel_1 ---> [32-bit Reg] --+ |            | +-- [32-bit Reg] <--- rx_channel_2
+                                   | |            | |
+                                   v v            v v
+                        +------------------------------+
+                        |   SKEW WATCHDOG SYSTEM       |
+                        |                              |
+                        |   - Open Window on 1st Pulse |
+                        |   - Increment Timer up to 32 |
+                        |   - Lock Out Input Chatter   |
+                        +--------------+---------------+
+                                       |
+                                       v
+                        +------------------------------+
+                        |  MIMO DUAL-CORE EVALUATION   |
+                        |                              |
+                        |   Mode 00: Strict Matching   |
+                        |   Mode 01: Ch1 Fallback      |
+                        |   Mode 10: Ch2 Fallback      |
+                        +------------------------------+
+
+Complex Inter-Channel Handshaking Mechanics
+    The receiver block handles async timing variations (skew) between 
+    the physical channel inputs using an active monitoring window:
+
+-   Pulse Extraction & Chatter Lockout: ch1_pulse and blue_pulse monitor for rising edges. 
+    Once an active pulse is caught, ch1_valid_data locks high. This ignores secondary signal 
+    line bounces ("chatter") until the evaluator resets the entire capture layer.
+
+-   Watchdog Window Initialization: If a pulse arrives on one channel alone, 
+    timer_active engages, triggering a countdown. The system can tolerate a 
+    layout or line propagation delay up to MAX_SKEW_DELAY cycles before failing.
+
+-   Look-Ahead Coherence Matrix: To achieve low latency, the evaluation logic 
+    uses a look-ahead decode layer. If Channel 2 arrives late but within the open window, 
+    the logic evaluates the data immediately by pairing the historically cached register with 
+    the live input wire (rx_channel_2), bypassing a one-cycle register delay.
+
+Receiver Matrix State & Status Code Mapping
+
+The 4-bit status_flags vector changes according to the core's internal state transitions:
+
+Status Code	Binary Vector	System Meaning / Trigger Condition
+0x3	4'b0011	Perfect Match: Channels match within the skew limit.
+4	4'b1100	Payload Contradiction: Channels arrive within the window but carry conflicting data.
+8	4'b1000	Strict Timeout: The watchdog window expires in Mode 2'b00 (Data Dropped).
+5	4'b0101	Ch1 Fallback Active: Window expired in Mode 2'b01; valid Ch1 data safely recovered.
+6	4'b0110	Ch2 Fallback Active: Window expired in Mode 2'b10; valid Ch2 data safely recovered.
+10	4'b1010	Complete Source Failure: Mode 2'b01 timeout occurred, but Ch1 was the missing channel.
+9	4'b1001	Complete Source Failure: Mode 2'b10 timeout occurred, but Ch2 was the missing channel.
+
+Dedicated Receiver Unit Test Assertions
+The test_telemetry_rx.py environment includes five targeted functional test cases:
+
+-   Asymmetrical Catch-Up Tracking (test_symmetric_skew_ch2_leads_ch1):
+    Fires Channel 2 early, waits 12 clock cycles, then fires Channel 1. 
+    Asserts that voted_cmd_valid stays low during the skew interval and 
+    asserts immediately when Channel 1 arrives with matching data.
+
+-   Security Contradiction Isolation (test_corner_data_contradiction):
+    Injects simultaneous valid signals but forces conflicting data streams (0x0000FFFF vs 0xFFFF0000). 
+    Asserts that voted_cmd_valid stays low, blocking corrupt data, and verifies the flag reports error vector 4'b1100.
+
+-   Asynchronous Bounce Mitigation (test_corner_chatter_retrigger):
+    Fires Channel 1, then injects a second, malicious noise pulse on Channel 1 
+    while the watchdog window is open. Asserts that the internal state machine 
+    filters out the chatter and completes a valid data match when Channel 2 arrives.
+
+-   Strict Mode Isolation (test_corner_watchdog_timeout_ch1_isolated):
+    Fires Channel 1 alone under default Mode 2'b00. Ticks past 34 cycles 
+    and asserts that the data is dropped, verifying that the status flags 
+    report error vector 4'b1000.
+
+-   Dynamic Software Fallback Recovery (test_corner_mimo_fallback_ch1_only):
+    Configures the system to Mode 2'b01 (Fallback Ch1). Fires Channel 1 alone, 
+    runs past the timeout boundary, and asserts that voted_cmd_valid goes 
+    high to output the isolated Channel 1 packet.
+
+
++------------------------------------------------------------------------+
+| LAYER 3: Timing Skew, Boundary Edge & Chatter Mitigation               |
+| -> test_symmetric_skew_ch2_leads_ch1                                   |
+| -> test_corner_chatter_retrigger                                       |
++------------------------------------------------------------------------+
+| LAYER 2: MIMO Fault-Tolerance & Register Configuration Validation      |
+| -> test_corner_watchdog_timeout_ch1_isolated                           |
+| -> test_corner_mimo_fallback_ch1_only                                  |
+| -> test_corner_data_contradiction                                      |
++------------------------------------------------------------------------+
+| LAYER 1: Core Synchronous Interface & Handshake Compliance             |
+| -> test_tx_periodic_strobe                                             |
+| -> test_tx_payload_latching                                            |
+| -> test_tx_reset_behavior                                              |
+| -> test_wb_telemetry_integration                                       |
++------------------------------------------------------------------------+

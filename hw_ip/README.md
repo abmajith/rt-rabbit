@@ -30,17 +30,17 @@ cd hw_ip/sim
 uv run sh -c "make clean && make TARGET=pwm_unit"
 
 # Target Quadrature Encoder Tracking
-uv run make clean && uv run make WAVES=1 MODULE=qei
 uv run sh -c "make clean && make TARGET=qei_unit"
+
+# telemetry wishbone specification
+uv run sh -c "make clean && make TARGET=wb_telemetry"
+# telemetry sub systems
+uv run sh -c "make clean && make TARGET=telemetry_rx"
+uv run sh -c "make clean && make TARGET=telemetry_tx"
 
 # Target the telemetry
 uv run sh -c "make clean && make TARGET=telemetry"
 
 # Target top 
 uv run sh -c "make clean && make TARGET=top"
-
-# telemetry wishbone specification
- uv run sh -c "make clean && make TARGET=wb_telemetry"
-  uv run sh -c "make clean && make TARGET=telemetry_rx"
-   uv run sh -c "make clean && make TARGET=telemetry_tx"
 ```
