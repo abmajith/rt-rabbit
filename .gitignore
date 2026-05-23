@@ -10,7 +10,7 @@ rt_rabbit/__pycache__/
 # Build
 dist/
 build/
-assets
+assets/
 
 # Block all Value Change Dump waveform trace captures recursively
 **/*.vcd
