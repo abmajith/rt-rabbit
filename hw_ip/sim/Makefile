@@ -28,16 +28,19 @@ else ifeq ($(TARGET), telemetry_rx)
     TOPLEVEL = telemetry_rx
     VERILOG_SOURCES = $(shell pwd)/../components/telemetry/telemetry_rx.v
     COCOTB_TEST_MODULES = test_telemetry_rx
+
 else ifeq ($(TARGET), telemetry_tx)
+    COMPILE_ARGS += -GMAX_COUNT=100
     TOPLEVEL = telemetry_tx
     VERILOG_SOURCES = $(shell pwd)/../components/telemetry/telemetry_tx.v
     COCOTB_TEST_MODULES = test_telemetry_tx
-else ifeq ($(TARGET), telemetry)
+
+else ifeq ($(TARGET), wb_telemetry)
     TOPLEVEL = wb_telemetry
     VERILOG_SOURCES = $(shell pwd)/../components/telemetry/telemetry_rx.v \
                       $(shell pwd)/../components/telemetry/telemetry_tx.v \
                       $(shell pwd)/../components/telemetry/wb_telemetry.v
-    COCOTB_TEST_MODULES = test_telemetry_ip
+    COCOTB_TEST_MODULES = test_wb_telemetry
 else ifeq ($(TARGET), telemetry_rf)
     # Target to verify our asynchronous-to-bus pipeline standalone
     TOPLEVEL = rt_telemetry_top
