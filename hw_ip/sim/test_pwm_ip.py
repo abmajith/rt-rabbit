@@ -1,99 +1,100 @@
-# hw_ip/sim/test_pwm_ip.py
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, FallingEdge
-import random
 from wb_driver import WishboneDriver
+from wb_assertions import WishboneProtocolAsserter
 
 
 @cocotb.test()
-async def test_scenario_directed_simulation(dut):
-    """Scenario A: Standard simulation targeting static speed metrics."""
+async def test_pwm_unit_and_wb_assertions(dut):
+    """Validates Bus Interconnect, Register Mapping, and Protocol Compliance"""
 
-    # 1. Fire up the shared infrastructure clock engine
+    # 1. Initialize clock structure (50 MHz = 20ns period)
     cocotb.start_soon(Clock(dut.wb_clk_i, 20, unit="ns").start())
 
-    # 2. Instantiate our modular driver interface
+    # 2. fire up the protocol checker
+    protocol_checker = WishboneProtocolAsserter(dut, dut.wb_clk_i)
+    cocotb.start_soon(protocol_checker.start_monitoring())
+
+    # 3. Setup driver
     driver = WishboneDriver(dut, clk_signal=dut.wb_clk_i, rst_signal=dut.wb_rst_i)
     await driver.reset_system()
 
-    dut._log.info("Executing directed configuration sequence...")
-    await driver.write_reg(address=0x01, data=500)  # Period = 500 ticks
-    await driver.write_reg(address=0x02, data=125)  # Duty = 125 ticks (25%)
-    await driver.write_reg(address=0x00, data=1)  # Enable core
+    dut._log.info(
+        "[Verification Stage]: Testing Memory Mapped Read/Write Back Veracity..."
+    )
 
-    # ==========================================================================
-    # COMPREHENSIVE SIGNAL METRIC MEASUREMENT
-    # ==========================================================================
-    dut._log.info("Measuring physical PWM output wave metrics...")
-    # Wait for the start of Cycle 1
+    # Test Register Write and Read-back matching
+    await driver.write_reg(address=0x01, data=1200)  # Write to REG_PER
+    read_back_period = await driver.read_reg(address=0x01)
+    assert read_back_period == 1200, (
+        f"Register Corruption: Expected 1200, read {read_back_period}"
+    )
+
+    await driver.write_reg(address=0x02, data=300)  # Write to REG_DUTY
+    read_back_duty = await driver.read_reg(address=0x02)
+    assert read_back_duty == 300, (
+        f"Register Corruption: Expected 300, read {read_back_duty}"
+    )
+
+    dut._log.info("[Verification Stage]: Checking Waveform Timing Accuracy...")
+    await driver.write_reg(address=0x00, data=1)  # Enable Controller Core
+
+    # Wait for stable cycle
     await RisingEdge(dut.pwm_pad_o)
-    t_rise1 = cocotb.utils.get_sim_time(unit="ns")
-
-    # Wait for the falling edge (end of high time)
+    t_start = cocotb.utils.get_sim_time(unit="ns")
     await FallingEdge(dut.pwm_pad_o)
-    t_fall = cocotb.utils.get_sim_time(unit="ns")
-
-    # Wait for the start of Cycle 2 (completion of a full period)
+    t_mid = cocotb.utils.get_sim_time(unit="ns")
     await RisingEdge(dut.pwm_pad_o)
-    t_rise2 = cocotb.utils.get_sim_time(unit="ns")
+    t_end = cocotb.utils.get_sim_time(unit="ns")
 
-    # Calculate intervals
-    high_time_ns = t_fall - t_rise1
-    total_period_ns = t_rise2 - t_rise1
+    high_time = t_mid - t_start
+    total_time = t_end - t_start
+    calculated_duty = (high_time / total_time) * 100
 
-    # Calculate real-world generated frequency (Converting ns to Hz)
-    real_frequency_hz = 1_000_000_000 / total_period_ns
-    measured_duty_cycle = (high_time_ns / total_period_ns) * 100
-
-    dut._log.info("--- Measured Waveform Report ---")
-    dut._log.info(f"  > Active High Pulse Duration: {high_time_ns} ns")
-    dut._log.info(f"  > Measured Total Period:    {total_period_ns} ns")
-    dut._log.info(f"  > Calculated Frequency:      {real_frequency_hz / 1000:.2f} kHz")
-    dut._log.info(f"  > Calculated Duty Cycle:     {measured_duty_cycle:.1f} %")
-    dut._log.info("--------------------------------")
-
-    # Strict Verification Assertions
-    assert total_period_ns == 10000, (
-        f"Frequency Bug: Expected 10,000ns period, got {total_period_ns}ns"
+    assert total_time == (1200 * 20), (
+        f"Timing Error: Expected {1200 * 20}ns period, got {total_time}ns"
     )
-    assert measured_duty_cycle == 25.0, (
-        f"Duty Bug: Expected 25% duty cycle, got {measured_duty_cycle}%"
+    assert calculated_duty == 25.0, (
+        f"Duty Cycle Error: Expected 25.0%, got {calculated_duty}%"
     )
-
-    dut._log.info("Directed simulation completed successfully.")
+    dut._log.info(f"[PASSED]: Duty cycle cleanly verified at {calculated_duty}%")
 
 
 @cocotb.test()
-async def test_scenario_random_verification(dut):
-    """Scenario B: Stress test the hardware core against random robotic input profiles."""
-
+async def test_pwm_unit_fuzzing_and_saturation(dut):
+    """Simulates heavy stress profiles and safety-critical saturation limits"""
     cocotb.start_soon(Clock(dut.wb_clk_i, 20, unit="ns").start())
     driver = WishboneDriver(dut, clk_signal=dut.wb_clk_i, rst_signal=dut.wb_rst_i)
     await driver.reset_system()
 
-    await driver.write_reg(address=0x01, data=200)  # Base Period Window = 200 ticks
-    await driver.write_reg(address=0x00, data=1)  # Enable core
+    # Define operating environment metrics
+    base_period = 500
+    await driver.write_reg(address=0x01, data=base_period)
+    await driver.write_reg(address=0x00, data=1)
 
-    dut._log.info("Starting constrained random validation fuzzing...")
-    for _ in range(20):
-        target_speed = random.choice(
-            [0, 50, 100, 200, 250]
-        )  # Includes safety corner cases
-        await driver.write_reg(address=0x02, data=target_speed)
+    dut._log.info(
+        "[Verification Stage]: Injecting Constrained Random Robotic Inputs..."
+    )
 
-        # --- Wait 1 clock edge for the register assignment to hit the pin! ---
-        await RisingEdge(dut.wb_clk_i)
-        # Run the simulation engine for 1 complete PWM wave frame to verify response
-        for _ in range(200):
+    # Fuzzing array containing safe values, 0% dropouts, and over-throttle extremes
+    stress_profiles = [100, 0, 250, 500, 650, 0, 125, 900]
+
+    for index, target_duty in enumerate(stress_profiles):
+        dut._log.info(
+            f"Fuzz Transaction Run #{index}: Programming Duty Target = {target_duty} ticks"
+        )
+        await driver.write_reg(address=0x02, data=target_duty)
+
+        for _ in range(base_period + 10):
             await RisingEdge(dut.wb_clk_i)
 
-            # Real-time hardware assertion monitoring
-            if target_speed == 0:
-                assert dut.pwm_pad_o.value == 0, (
-                    "Safety Bug: Motor active during 0 speed lock!"
+            current_pad_state = int(dut.pwm_pad_o.value)
+            if target_duty == 0:
+                assert current_pad_state == 0, (
+                    "Safety Breach: Motor activated during requested 0% safe shutdown state!"
                 )
-            if target_speed >= 200:
-                assert dut.pwm_pad_o.value == 1, (
-                    "Safety Bug: Wave glitched out during over-throttle saturation!"
+            elif target_duty >= base_period:
+                assert current_pad_state == 1, (
+                    "Safety Breach: Signal glitched out or dropped low during saturation throttle!"
                 )
