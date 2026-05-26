@@ -41,6 +41,27 @@ else ifeq ($(TARGET), wb_telemetry)
                       $(shell pwd)/../components/telemetry/telemetry_tx.v \
                       $(shell pwd)/../components/telemetry/wb_telemetry.v
     COCOTB_TEST_MODULES = test_wb_telemetry
+
+else ifeq ($(TARGET), rf_cdc)
+    TOPLEVEL            = rf_cdc_synchronizer
+    VERILOG_SOURCES     = $(shell pwd)/../components/telemetry/rf_cdc_synchronizer.v
+    COCOTB_TEST_MODULES = test_rf_cdc_synchronizer
+
+else ifeq ($(TARGET), rf_bit_aligner)
+    TOPLEVEL            = rf_bit_aligner
+    VERILOG_SOURCES     = $(shell pwd)/../components/telemetry/rf_bit_aligner.v
+    COCOTB_TEST_MODULES = test_rf_bit_aligner
+
+else ifeq ($(TARGET), rf_packet_framer)
+    TOPLEVEL = rf_packet_framer
+    VERILOG_SOURCES = $(shell pwd)/../components/telemetry/rf_packet_framer.v
+    COCOTB_TEST_MODULES = test_rf_packet_framer
+
+else ifeq ($(TARGET), wb_rf_framer_ctrl)
+    TOPLEVEL = wb_rf_framer_ctrl
+    VERILOG_SOURCES = $(shell pwd)/../components/telemetry/wb_rf_framer_ctrl.v
+    COCOTB_TEST_MODULES = test_wb_rf_framer_ctrl
+
 else ifeq ($(TARGET), telemetry_rf)
     # Target to verify our asynchronous-to-bus pipeline standalone
     TOPLEVEL = rt_telemetry_top
