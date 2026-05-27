@@ -1,73 +1,67 @@
-import cocotb
-from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge, FallingEdge, Timer
 import random
 
-async def drive_async_rf_clock(dut, bit_rate_hz=500000):
-    """
-    Independent coroutine simulating a drifting, jittery external RF clock.
-    Runs completely decoupled from the system clock time wheel.
-    """
+import cocotb
+from cocotb.clock import Clock
+from cocotb.triggers import RisingEdge, Timer
+
+_TIMEOUT_CYCLE = (
+    400  # 400 system cycles max window at 100MHz (sys clock) vs 500kHz (rf clock)
+)
+_INJECT_EDGES = 20
+_DELTA_NS = 1
+
+
+async def drive_async_rf_clock(
+    dut, bit_rate_hz: int = 500000, jitter_percent_cap: float = 0.05
+):
+    # RF simulated Clock with jitter drifting
     base_half_period_ps = int((1.0 / bit_rate_hz) * 1e12) // 2
     dut.rf_clock_i.value = 0
-    
     while True:
-        # Introduce up to +/- 5% random phase jitter on every single half-cycle
-        jitter_percent = random.uniform(-0.05, 0.05)
+        jitter_percent = random.uniform(-jitter_percent_cap, jitter_percent_cap)
         half_period_ps = int(base_half_period_ps * (1.0 + jitter_percent))
-        
         await Timer(half_period_ps, unit="ps")
         dut.rf_clock_i.value = ~dut.rf_clock_i.value
 
-@cocotb.test()
-async def test_cdc_edge_capture_and_metastability(dut):
-    """Isolates and validates the 3-stage shift-register edge detection performance."""
-    
-    # 100MHz internal FPGA system clock (10ns period)
-    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
-    
+
+async def init_rf_cdc(
+    dut,
+    t_clock_ns: int = 10,
+    bit_rate_hz: int = 500000,
+    jitter_percent_cap: float = 0.05,
+    n_cycles: int = 5,
+):
+    cocotb.start_soon(Clock(dut.clk, t_clock_ns, unit="ns").start())
     dut.rst.value = 1
     dut.rf_clock_i.value = 0
     dut.rf_data_i.value = 0
-    
-    # Hold reset for 5 system clock cycles
-    for _ in range(5):
+    for _ in range(n_cycles):
         await RisingEdge(dut.clk)
     dut.rst.value = 0
     await RisingEdge(dut.clk)
-    
-    # asynchronous RF clock generator
-    cocotb.start_soon(drive_async_rf_clock(dut, bit_rate_hz=500000))
-    
-    
-    detected_edges = 0
-    expected_edges = 20
-    
-    dut._log.info(f"Injecting {expected_edges} asynchronous clock edges with phase jitter...")
-    
-    for _ in range(expected_edges):
+    cocotb.start_soon(drive_async_rf_clock(dut, bit_rate_hz, jitter_percent_cap))
+
+
+@cocotb.test()
+async def test_cdc_edge_capture_and_metastability(dut):
+    # 3-stage shift-register edge detection validation
+    await init_rf_cdc(dut)
+    for _ in range(_INJECT_EDGES):
         await RisingEdge(dut.rf_clock_i)
-        
         dut.rf_data_i.value = random.choice([0, 1])
-        
-        # Look downstream in the system clock domain. 
-        # The edge detection pulse should arrive exactly 2 to 3 system clock cycles later.
-        timeout_cycles = 400 # 400 system cycles max window at 100MHz vs 500kHz
         pulse_found = False
-        
-        for _ in range(timeout_cycles):
+
+        for _ in range(_TIMEOUT_CYCLE):
             await RisingEdge(dut.clk)
             if str(dut.rf_bit_valid_o.value) == "1":
                 pulse_found = True
-                detected_edges += 1
-                
-                # Check that the data bit registered matches what we sent
-                # Allowing for the stage-2 sampling delay
-                await Timer(1, unit="ns") # Small delta to let the output stabilize
-                assert dut.rf_serial_o.value == dut.rf_data_i.value, \
-                    f"CDC data corruption detected! Sent: {dut.rf_data_i.value}, Captured: {dut.rf_serial_o.value}"
+                # small stabilize time to check the result
+                await Timer(_DELTA_NS, unit="ns")
+                assert dut.rf_serial_o.value == dut.rf_data_i.value, (
+                    "CDC data corruption detected!"
+                )
                 break
-                
-        assert pulse_found, "The synchronizer dropped an asynchronous RF clock edge event!"
 
-    dut._log.info(f"[SUCCESS] Captured all {detected_edges}/{expected_edges} jittery edges with zero sample drops.")
+        assert pulse_found, (
+            "The synchronizer dropped an asynchronous RF clock edge event!"
+        )
