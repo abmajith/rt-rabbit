@@ -24,7 +24,6 @@ class WishboneProtocolAsserter:
         return int(signal.value)
 
     async def start_monitoring(self):
-        """Continuously loops and asserts protocol rules on every clock edge."""
         while True:
             await RisingEdge(self.clk)
             cyc_val = self._safe_get_bit(self.cyc)
