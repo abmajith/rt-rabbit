@@ -1,69 +1,69 @@
 `timescale 1ns/1ps
 
-module rf_bit_aligner (
-    input  wire        sys_clk,       // Global FPGA system clock (100 MHz)
-    input  wire        sys_rst,       // Global synchronous reset
-    input  wire        clear_lock,    // Reset the framing lock from upper layers
-    
-    // Physical transceiver interface lines
-    input  wire        rf_clk,        // Recovered clock from RF chip (~10 MHz)
-    input  wire        rf_data,       // Raw stabilized serial bitstream from RF chip
-    
-    // Aligned parallel interface to our Command Parser
-    output reg  [7:0]  rx_byte,       // Aligned 8-bit parallel byte output
-    output reg         byte_valid     // High for exactly 1 sys_clk cycle when rx_byte is stable
+module rf_bit_aligner #(
+    parameter [15:0] SOF_MARKER = 16'hF53A  // Start of packet frame
+)(
+    input  wire        clk,             // sys clk
+    input  wire        rst,             // Synchronous Active-High Reset
+
+    input  wire        cfg_clear_lock_i, // Force-unlock alignment manually
+
+    // sys clk synchronized RF Data bit
+    input  wire        rf_serial_i,      // rf serial bit-stream
+    input  wire        rf_bit_valid_i,   // Strobe on rf serial bit-stream stability
+
+    // Deserialized Output Interface (Aligned Data Stream)
+    output reg  [15:0] aligned_word_o,   
+    output reg         word_valid_o,     // High for exactly 1 cycle when word is valid
+    output reg         sof_detected_o,   // Single-cycle pulse on initial SOF boundary lock
+    output reg         lock_status_o     // High when bit-grid alignment is locked
 );
 
-    parameter [15:0] SYNC_WORD = 16'hF53A;
+    // Sliding window register to hunt for SOF marker
+    /* verilator lint_off UNUSEDSIGNAL */
+    reg [15:0] bit_shift_reg;
+    /* verilator lint_on UNUSEDSIGNAL */
 
-    reg [2:0] rf_clk_sync;
-    reg [1:0] rf_data_sync;
-    
-    always @(posedge sys_clk) begin
-        if (sys_rst) begin
-            rf_clk_sync  <= 3'b0;
-            rf_data_sync <= 2'b0;
+    // Accumulation register for gathering the next aligned word payload
+    /* verilator lint_off UNUSEDSIGNAL */
+    reg [15:0] data_accum_reg;
+    /* verilator lint_on UNUSEDSIGNAL */
+
+    // Bit grid counter tracking deserialization boundary alignment
+    reg [3:0]  bit_counter;
+
+    always @(posedge clk) begin
+        if (rst || cfg_clear_lock_i) begin
+            bit_shift_reg   <= 16'h0;
+            data_accum_reg  <= 16'h0;
+            bit_counter     <= 4'd0;
+            aligned_word_o  <= 16'h0;
+            word_valid_o    <= 1'b0;
+            sof_detected_o  <= 1'b0;
+            lock_status_o   <= 1'b0;
         end else begin
-            rf_clk_sync  <= {rf_clk_sync[1:0], rf_clk};
-            rf_data_sync <= {rf_data_sync[0], rf_data};
-        end
-    end
+            // single-cycle defaults
+            word_valid_o    <= 1'b0;
+            sof_detected_o  <= 1'b0;
 
-    wire rf_clk_edge = (rf_clk_sync[1] && !rf_clk_sync[2]);
-    wire sampled_bit = rf_data_sync[1];
+            if (rf_bit_valid_i) begin
+                bit_shift_reg <= {bit_shift_reg[14:0], rf_serial_i};
 
-    reg [15:0] bit_shifter;
-    reg [2:0]  bit_counter;
-    reg        frame_locked;
-
-    always @(posedge sys_clk) begin
-        if (sys_rst) begin
-            bit_shifter  <= 16'h0;
-            bit_counter  <= 3'b0;
-            frame_locked <= 1'b0;
-            rx_byte      <= 8'h0;
-            byte_valid   <= 1'b0;
-        end else begin
-            byte_valid <= 1'b0; // Default strobe low
-
-            if (clear_lock) begin
-                frame_locked <= 1'b0; // Force break out of old transaction tracking
-            end
-
-            if (rf_clk_edge) begin
-                bit_shifter <= {bit_shifter[14:0], sampled_bit};
-                
-                if (!frame_locked && !clear_lock) begin
-                    if ({bit_shifter[14:0], sampled_bit} == SYNC_WORD) begin
-                        frame_locked <= 1'b1;
-                        bit_counter  <= 3'b0;
+                if (!lock_status_o) begin
+                    if ({bit_shift_reg[14:0], rf_serial_i} == SOF_MARKER) begin
+                        lock_status_o  <= 1'b1;
+                        sof_detected_o <= 1'b1;
+                        bit_counter    <= 4'd0; // Freeze the bit grid boundary instantly
                     end
-                end else if (frame_locked) begin
-                    bit_counter <= bit_counter + 1'b1;
+                end else begin
+                    data_accum_reg <= {data_accum_reg[14:0], rf_serial_i};
                     
-                    if (bit_counter == 3'b111) begin
-                        rx_byte    <= {bit_shifter[6:0], sampled_bit};
-                        byte_valid <= 1'b1;
+                    if (bit_counter == 4'd15) begin
+                        bit_counter    <= 4'd0;
+                        aligned_word_o <= {data_accum_reg[14:0], rf_serial_i};
+                        word_valid_o   <= 1'b1;
+                    end else begin
+                        bit_counter <= bit_counter + 1'b1;
                     end
                 end
             end

@@ -2,8 +2,6 @@ from cocotb.triggers import RisingEdge, Timer
 
 
 class WishboneDriver:
-    """Drives transactions over a standard Wishbone bus interface."""
-
     def __init__(self, dut, clk_signal, rst_signal):
         self.dut = dut
         self.clk = clk_signal
@@ -19,7 +17,6 @@ class WishboneDriver:
         self.ack = dut.wb_ack_o if self.is_unit else dut.wb_ack
 
     async def reset_system(self, duration_ns: int = 100) -> None:
-        """Applies reset over the specified duration."""
         self.cyc.value = 0
         self.stb.value = 0
         self.we.value = 0
@@ -31,7 +28,6 @@ class WishboneDriver:
         await RisingEdge(self.clk)
 
     async def write_reg(self, address: int, data: int) -> None:
-        """Executes a standardized Master Write Cycle."""
         await RisingEdge(self.clk)
         self.adr.value = address
         self.dat_w.value = data
