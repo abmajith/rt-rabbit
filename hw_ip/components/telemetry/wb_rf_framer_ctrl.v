@@ -8,7 +8,11 @@ module wb_rf_framer_ctrl #(
     input  wire        wb_clk_i,
     input  wire        wb_rst_i,
     input  wire [1:0]  wb_adr_i,   
+    
+    /* verilator lint_off UNUSEDSIGNAL */
     input  wire [31:0] wb_dat_i,
+    /* verilator lint_off UNUSEDSIGNAL */
+
     output reg  [31:0] wb_dat_o,
     input  wire        wb_we_i,
     input  wire        wb_stb_i,
@@ -29,7 +33,7 @@ module wb_rf_framer_ctrl #(
     // Bus activation monitor flag
     wire bus_select = wb_cyc_i && wb_stb_i;
 
-    // Track frame arrival milestone patterns locally to keep sticky error/status dashboards
+    // tracking data packet frame locally
     reg sticky_overflow;
     reg sticky_mismatch;
     reg sticky_complete;
@@ -46,7 +50,6 @@ module wb_rf_framer_ctrl #(
             wb_ack_o         <= 1'b0;
             cfg_clear_lock_o <= 1'b0; // Auto-clearing single cycle stroke behavior
 
-            // Capture raw error spikes from parsing pipelines into sticky registers
             if (err_overflow_i)        sticky_overflow <= 1'b1;
             if (err_length_mismatch_i) sticky_mismatch <= 1'b1;
             if (frame_complete_i)      sticky_complete <= 1'b1;
