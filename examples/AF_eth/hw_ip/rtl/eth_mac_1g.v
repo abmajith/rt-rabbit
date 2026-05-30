@@ -13,7 +13,7 @@ module eth_mac_1g(
   output reg [7:0]  m_axis_tdata, // aligned packet data byte
   output reg        m_axis_tvalid,// Asserted during valid payload byte
   output reg        m_axis_tlast, // pulsed high on the final pcket byte
-  output reg        m_axis_tuser,  // Error flag (1 = packet bad/CRC fail)
+  output reg        m_axis_tuser  // Error flag (1 = packet bad/CRC fail)
 );
   // internal fsm code 
   localparam STATE_IDLE     = 2'b00;

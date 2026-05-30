@@ -17,8 +17,8 @@ module ip_ep (
   output reg [7:0] m_axis_tdata,
   output reg       m_axis_tvalid,
   output reg       m_axis_tlast,
-  output reg       m_axis_tuser,
-):
+  output reg       m_axis_tuser
+);
   // Track our exact byte index within the incoming IP frame 
   reg [15:0]  byte_count;
   reg         packet_active;
@@ -71,10 +71,10 @@ module ip_ep (
       m_axis_tvalid <= s_axis_tvalid;
       m_axis_tlast <= s_axis_tlast;
 
-      if (s_axis_tlast) begin
+      if (s_axis_tvalid && byte_count == 0) begin
+        m_axis_tuser <= 1'b0;
+      end else if (s_axis_tlast) begin
         m_axis_tuser <= s_axis_tuser || (!ip_match) || (!is_udp);
-      end else begin
-        m_axis_tuser <= m_axis_tuser;
       end
     end
   end

@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-module udp_up (
+module udp_ep (
   input wire  clk,
   input wire  rst,
 
@@ -11,7 +11,7 @@ module udp_up (
   input wire [7:0] s_axis_tdata,
   input wire       s_axis_tvalid,
   input wire       s_axis_tlast,
-  input wire       s_axist_tuser,
+  input wire       s_axis_tuser,
 
   // Output appliation payload bytes only
   output reg [7:0]  m_axis_tdata,
@@ -23,6 +23,8 @@ module udp_up (
   reg [15:0] udp_byte_count;
   reg        port_match;
   wire       payload_zone;
+
+  assign payload_zone = (udp_byte_count >= 16'd8);
 
   always @(posedge clk) begin
     if (rst) begin
@@ -58,10 +60,10 @@ module udp_up (
       m_axis_tvalid <= s_axis_tvalid && payload_zone;
       m_axis_tlast <= s_axis_tlast;
 
-      if (s_axis_tlast) begin
+      if (s_axis_tvalid && udp_byte_count == 0) begin
+        m_axis_tuser <= 1'b0;
+      end else if (s_axis_tlast) begin
         m_axis_tuser <= s_axis_tuser || (!port_match);
-      end else begin
-        m_axis_tuser <= s_axis_tuser;
       end
     end
   end
