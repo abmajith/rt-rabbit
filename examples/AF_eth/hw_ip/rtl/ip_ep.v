@@ -21,7 +21,6 @@ module ip_ep (
 );
   // Track our exact byte index within the incoming IP frame 
   reg [15:0]  byte_count;
-  reg         packet_active;
   reg         ip_match;
   reg         is_udp;
 
@@ -29,14 +28,11 @@ module ip_ep (
   always @(posedge clk) begin
     if (rst) begin
       byte_count    <= 16'h0000;
-      packet_active <= 1'b0;
     end else begin
       if (s_axis_tvalid) begin
         if (s_axis_tlast) begin
           byte_count    <= 16'h0000;
-          packet_active <= 1'b0;
         end else begin
-          packet_active <= 1'b1;
           byte_count    <= byte_count + 16'h0001;
         end
       end
