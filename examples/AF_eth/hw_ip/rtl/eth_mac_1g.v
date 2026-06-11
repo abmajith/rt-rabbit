@@ -75,7 +75,7 @@ module eth_mac_1g(
           m_axis_tdata <= gmii_rxd_reg;
           m_axis_tvalid <= gmii_rx_dv_reg;
           m_axis_tuser <= gmii_rx_er_reg;
-          m_axis_tlast <= !gmii_rx_dv;
+          m_axis_tlast <= gmii_rx_dv_reg && !gmii_rx_dv;
         end 
         default: begin 
           m_axis_tdata  <= 8'h00;

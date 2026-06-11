@@ -28,3 +28,4 @@ assets/**
 # Block all bytecode compilation caches recursively across any folder tree
 **/__pycache__/
 **/*.pyc
+.aider*

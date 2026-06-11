@@ -24,7 +24,7 @@ module udp_ep (
   reg        port_match;
   wire       payload_zone;
 
-  assign payload_zone = (udp_byte_count >= 16'd8);
+  assign payload_zone = (udp_byte_count >= 16'd7);
 
   always @(posedge clk) begin
     if (rst) begin
