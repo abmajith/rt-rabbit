@@ -1,0 +1,7 @@
+arm_64bit=1
+kernel=zephyr.bin
+enable_uart=1
+core_freq=250
+dtoverlay=miniuart-bt
+device_tree=bcm2710-rpi-3-b-plus.dtb
+

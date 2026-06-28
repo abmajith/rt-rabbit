@@ -1,0 +1,25 @@
+/ {
+	chosen {
+		zephyr,console = &uart1_pi3;
+		zephyr,shell-uart = &uart1_pi3;
+	};
+};
+
+/* This is the correct way to modify an existing absolute path node */
+&{/soc} {
+	/* Override BCM2711 peripheral base to Pi 3's BCM2837 base (0x3F000000) */
+	ranges = <0x7e000000 0x3f000000 0x01000000>;
+
+	uart1_pi3: uart@7e215040 {
+		compatible = "brcm,bcm2835-aux-uart";
+		reg = <0x7e215040 0x40>;
+		status = "okay";
+		current-speed = <115200>;
+		clock-frequency = <250000000>;
+	};
+};
+
+/* Disable the original Pi 4 default UART definition */
+&uart1 {
+	status = "disabled";
+};
