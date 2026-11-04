@@ -48,6 +48,7 @@ lint:
 	@# Strict (-Wall) check, but only fail on warnings in *our* RTL, not vendor cores.
 	@! verilator --lint-only -Wall -Wno-fatal -Wno-UNUSEDSIGNAL -Wno-PINCONNECTEMPTY \
 	  --top-module rabbit_soc_sim -f rtl/cores/$(CORE)/files.f -f rtl/soc/files.f \
+	  $$(sed -n 's/^CORE_VERILATOR_FLAGS *:= *//p' rtl/cores/$(CORE)/core.mk) \
 	  2>&1 | grep -E '%(Warning|Error)[^:]*: [^ ]*rtl/(soc|cores)/'
 	@echo "lint: own RTL clean"
 

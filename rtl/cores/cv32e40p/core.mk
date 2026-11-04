@@ -1,5 +1,6 @@
 # Per-core build settings, included by the top-level and dv Makefiles.
 CORE_MARCH       := rv32imc_zicsr
 CORE_MABI        := ilp32
-# CV32E40P is lint-clean except for a few style warnings in vendor code.
-CORE_VERILATOR_FLAGS := -Wno-fatal
+# Vendor code: keep warnings non-fatal. COMBDLY: bhv/cv32e40p_sim_clock_gate.sv
+# uses '<=' in a latch-style always_latch; Verilator >= 5.055 makes this an error.
+CORE_VERILATOR_FLAGS := -Wno-fatal -Wno-COMBDLY

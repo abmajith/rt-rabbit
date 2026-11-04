@@ -75,3 +75,20 @@ make ip-test        # Wishbone PWM, QEI, telemetry, RF pipeline (cocotb)
 make rma-smoke      # all rma_analysis/examples/*.yaml
 uv run rma_analysis rma_analysis/examples/simple_robot.yaml --plot
 ```
+
+## 6. Reproduce CI locally
+
+CI runs in the official Verilator image pinned in `.github/workflows/ci.yml`
+(currently `verilator/verilator:v5.054`). To run the same thing on your machine:
+
+```bash
+docker run --rm -it -v $PWD:/w -w /w -v $(command -v uv):/usr/local/bin/uv:ro \
+  -e UV_LINK_MODE=copy --entrypoint bash verilator/verilator:v5.054
+# inside the container:
+apt-get update && apt-get install -y gcc-riscv64-unknown-elf libpython3.12-dev
+make ci
+```
+
+Why pinned: on 2026-11-04 the nightly OSS CAD Suite shipped Verilator
+5.055-devel, which turned COMBDLY in CV32E40P's simulation clock gate into an
+error and broke CI while everything passed locally on 5.038.
