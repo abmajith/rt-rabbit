@@ -1,0 +1,72 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# All simulation jobs run in the official Verilator image, pinned to a release
+# (a nightly toolchain broke CI once: Verilator 5.055-devel made COMBDLY an error).
+# Same image locally: see docs/GETTING_STARTED.md "Reproduce CI locally".
+# Bump the tag deliberately, in all three jobs at once.
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    container: { image: "verilator/verilator:v5.054", options: --entrypoint "" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - run: verilator --version && make lint
+
+  soc-sim:
+    # One job per (core, program). Add cores here as rtl/cores/<name>/ adapters land.
+    runs-on: ubuntu-24.04
+    container: { image: "verilator/verilator:v5.054", options: --entrypoint "" }
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [cv32e40p]
+        prog: [hello]
+    steps:
+      - name: RISC-V GCC
+        run: apt-get update -q && apt-get install -y -q gcc-riscv64-unknown-elf libpython3.12-dev
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: astral-sh/setup-uv@v6
+      - run: make soc-sim CORE=${{ matrix.core }} PROG=${{ matrix.prog }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: soc-${{ matrix.core }}-${{ matrix.prog }}
+          path: |
+            dv/cocotb/soc/results.xml
+            sw/baremetal/build/${{ matrix.prog }}/${{ matrix.prog }}.dis
+
+  ip-test:
+    runs-on: ubuntu-24.04
+    container: { image: "verilator/verilator:v5.054", options: --entrypoint "" }
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [pwm_unit, qei_unit, telemetry_rx, telemetry_tx, wb_telemetry,
+                 rf_cdc, rf_bit_aligner, rf_packet_framer, wb_rf_framer_ctrl,
+                 rf_receiver_pipeline]
+    steps:
+      - run: apt-get update -q && apt-get install -y -q libpython3.12-dev
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - working-directory: hw_ip/sim
+        run: uv run make TARGET=${{ matrix.target }}   # non-zero exit on any failed test
+
+  rma-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: make rma-smoke

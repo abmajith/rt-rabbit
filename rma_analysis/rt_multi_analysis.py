@@ -1,6 +1,6 @@
 from typing import Dict, Optional
 from .rt_analysis import RTAnalysis
-from resource_arbiter import ResourceArbiter
+from .resource_arbiter import ResourceArbiter
 from .task import Task
 from .utils import calculate_rta
 from .utils import get_utility
