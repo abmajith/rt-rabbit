@@ -12,7 +12,6 @@ rabbit SoC fast enough to run a real regression, not just one smoke test.
   X-propagation, SKY130 / GF180 / IHP support, CUDA/HIP/Metal).
 - **No published accuracy/speed comparison on a real post-layout RISC-V
   netlist was found.** That benchmark alone is publishable.
-  (Details and sources: `docs/research/2026-11-04-soc-5yr-plan.md`, A.7–A.8.)
 
 ## Staged plan
 

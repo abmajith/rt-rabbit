@@ -1,5 +1,5 @@
 # Build a bare-metal program for the selected core.
-#   make PROG=hello            -> build/hello/hello.{elf,hex,dis}
+#   make PROG=hello            -> build/$(CORE)/hello/hello.{elf,hex,dis}
 #   make PROG=hello CORE=ibex  (once an ibex adapter exists)
 REPO  ?= $(abspath ../..)
 CORE  ?= cv32e40p
@@ -13,7 +13,7 @@ OBJCOPY= $(CROSS)objcopy
 OBJDUMP= $(CROSS)objdump
 
 COMMON = $(REPO)/sw/baremetal/common
-OUT    = build/$(PROG)
+OUT    = build/$(CORE)/$(PROG)
 
 CFLAGS  = -march=$(CORE_MARCH) -mabi=$(CORE_MABI) -O2 -g -Wall -Wextra \
           -ffreestanding -fno-builtin -nostdlib -I$(COMMON)
