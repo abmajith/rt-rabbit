@@ -53,14 +53,14 @@ module exhaustive_tb;
     for (int o = 0; o < 8; o++) begin
       for (int x = 0; x < 2**W; x++) begin
         for (int y = 0; y < 2**W; y++) begin
-          int cycles, want;
-          logic [W-1:0] got;
+          automatic int cycles, want;
+          automatic logic [W-1:0] got;
           op = 3'(o); a = W'(x); b = W'(y);
           want = op[2] ? W + 2 : 2;
           runs++;
           lfsr = lfsr ^ (lfsr << 13); lfsr = lfsr ^ (lfsr >> 17); lfsr = lfsr ^ (lfsr << 5);
           if (runs % 7 == 0) begin                  // interrupt it, then start again
-            int stop_after = int'(lfsr % unsigned'(want - 1)) + 1;
+            automatic int stop_after = int'(lfsr % unsigned'(want - 1)) + 1;
             req = 1'b1;
             repeat (stop_after) @(posedge clk);
             #1 req = 1'b0;

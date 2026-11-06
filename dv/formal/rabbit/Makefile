@@ -86,14 +86,17 @@ $(BUILD)/timing.sby: timing/timing.sby.in timing/rabbit_timing_tb.sv $(SOURCES) 
 # ---- multiply/divide unit (shared by every rabbit core) -------------------------------
 # muldiv:     formal (muldiv/muldiv.sby): values for every input at W = 4 / 6,
 #             exact latency at W = 32
-# muldiv-sim: every input at W = 8 in Verilator (muldiv/exhaustive_tb.sv)
+# muldiv-sim: every input at W = 8 in Verilator (muldiv/exhaustive_tb.sv).
+#             Warnings are shown but not fatal here: a newer Verilator adding a
+#             warning to this testbench must not break a proof run (the RTL itself
+#             is linted strictly by `make lint`).
 MULDIV_RTL := $(REPO)/rtl/cores/rabbit_common/rabbit_muldiv.sv
 muldiv: muldiv-sim
 	cd muldiv && sby -f muldiv.sby
 
 muldiv-sim:
 	@mkdir -p build/muldiv
-	verilator --binary --timing -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-PROCASSINIT \
+	verilator --binary --timing -Wall -Wno-fatal -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-PROCASSINIT \
 	  --top-module exhaustive_tb -Mdir build/muldiv -o exhaustive \
 	  $(MULDIV_RTL) muldiv/exhaustive_tb.sv > build/muldiv/build.log
 	build/muldiv/exhaustive | tee build/muldiv/run.log | grep -E 'FAIL|exhaustive|RESULT'
