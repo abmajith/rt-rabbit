@@ -1,18 +1,12 @@
 // =============================================================================
-// rabbit5_pkg — shared types for the rabbit5 core
+// rabbit_pkg — types, constants and small helper functions shared by every
+// rabbit core (rabbit3, rabbit5, ...)
 // =============================================================================
-// rabbit5 is a classic 5-stage, single-issue, in-order RV32I pipeline:
-//
-//     IF ──► ID ──► EX ──► MEM ──► WB
-//
-// Design goal: *timing you can reason about*. Every rule that decides how many
-// cycles an instruction takes is listed in rabbit5_core.sv ("TIMING RULES") and
-// is checked formally in dv/formal/rabbit5/timing/.
-//
-// Everything that is "a fact about RISC-V" (opcodes, CSR numbers, cause codes)
-// lives here, so the pipeline file only contains pipeline logic.
+// Everything here is "a fact about RISC-V" (opcodes, CSR numbers, cause codes)
+// or a stage-independent helper. Nothing here knows how many pipeline stages a
+// core has — that lives only in rabbitN_core.sv.
 // =============================================================================
-package rabbit5_pkg;
+package rabbit_pkg;
 
   // ---------------------------------------------------------------------------
   // RV32I major opcodes (instruction bits [6:0])
@@ -52,7 +46,7 @@ package rabbit5_pkg;
 
   // ---------------------------------------------------------------------------
   // Decoded instruction: everything later stages need to know, produced once
-  // by rabbit5_decoder in ID.
+  // by rabbit_decoder.
   // ---------------------------------------------------------------------------
   typedef struct packed {
     logic        illegal;     // not a supported instruction -> trap in EX
@@ -97,6 +91,90 @@ package rabbit5_pkg;
 
   // misa: MXL=1 (32-bit), extension I only
   localparam logic [31:0] MISA_VALUE = 32'h4000_0100;
+
+  // ---------------------------------------------------------------------------
+  // exec_t: everything known about an instruction once it has been executed.
+  // Produced by rabbit_execute, then simply carried to retirement:
+  //   rabbit3: X -> W          rabbit5: EX -> MEM -> WB
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    logic        valid;
+    logic [31:0] pc;
+    logic [31:0] instr;
+    logic [31:0] next_pc;     // where the program goes after this instruction
+    logic        trap;        // trapped: no register write, no memory access
+    logic        writes_rd;
+    logic [4:0]  rd;
+    logic [31:0] result;      // ALU / link / CSR value (loads: replaced at retirement)
+    logic        is_load;
+    logic        is_store;
+    logic [2:0]  funct3;      // load size and sign
+    logic [31:0] addr;        // byte address of the load/store
+    logic [3:0]  mem_be;      // byte enables within the addressed word
+    logic [31:0] mem_wdata;   // store data, already placed on the right byte lanes
+    logic [4:0]  rs1_addr;    // operands actually used (for RVFI only)
+    logic [4:0]  rs2_addr;
+    logic [31:0] rs1_val;
+    logic [31:0] rs2_val;
+  } exec_t;
+
+  // ---------------------------------------------------------------------------
+  // Helper functions (pure combinational)
+  // ---------------------------------------------------------------------------
+
+  // Branch condition for BEQ/BNE/BLT/BGE/BLTU/BGEU (funct3 selects)
+  function automatic logic branch_taken(input logic [2:0] funct3,
+                                        input logic [31:0] a, input logic [31:0] b);
+    unique case (funct3)
+      3'b000 : return a == b;                       // BEQ
+      3'b001 : return a != b;                       // BNE
+      3'b100 : return $signed(a) <  $signed(b);     // BLT
+      3'b101 : return $signed(a) >= $signed(b);     // BGE
+      3'b110 : return a <  b;                       // BLTU
+      3'b111 : return a >= b;                       // BGEU
+      default: return 1'b0;
+    endcase
+  endfunction
+
+  // Load/store size from funct3[1:0]: 00 byte, 01 half word, 10 word
+  function automatic logic lsu_misaligned(input logic [1:0] size, input logic [1:0] offset);
+    unique case (size)
+      2'b00  : return 1'b0;
+      2'b01  : return offset[0];
+      default: return offset != 2'b00;
+    endcase
+  endfunction
+
+  function automatic logic [3:0] lsu_byte_enable(input logic [1:0] size, input logic [1:0] offset);
+    unique case (size)
+      2'b00  : return 4'b0001 << offset;
+      2'b01  : return 4'b0011 << offset;
+      default: return 4'b1111;
+    endcase
+  endfunction
+
+  // Replicate store data so every byte lane carries the right byte
+  function automatic logic [31:0] lsu_store_lanes(input logic [1:0] size, input logic [31:0] data);
+    unique case (size)
+      2'b00  : return {4{data[7:0]}};
+      2'b01  : return {2{data[15:0]}};
+      default: return data;
+    endcase
+  endfunction
+
+  // Pick the loaded bytes out of the memory word and sign/zero-extend them
+  function automatic logic [31:0] lsu_load_value(input logic [2:0] funct3, input logic [1:0] offset,
+                                                 input logic [31:0] word);
+    logic [31:0] w;
+    w = word >> {offset, 3'b000};
+    unique case (funct3)
+      3'b000 : return {{24{w[7]}},  w[7:0]};    // LB
+      3'b001 : return {{16{w[15]}}, w[15:0]};   // LH
+      3'b100 : return {24'b0, w[7:0]};          // LBU
+      3'b101 : return {16'b0, w[15:0]};         // LHU
+      default: return w;                        // LW
+    endcase
+  endfunction
 
   // Exception cause codes (mcause)
   localparam logic [31:0] CAUSE_INSN_MISALIGNED  = 32'd0;

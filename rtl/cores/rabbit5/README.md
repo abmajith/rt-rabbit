@@ -17,27 +17,31 @@ IF ──► ID ──► EX ──► MEM ──► WB
 
 | What | Result | Command |
 |---|---|---|
-| `hello` firmware in the SoC | PASS, 3958 cycles (CV32E40P: 3450, it has HW mul/div) | `make soc-sim CORE=rabbit5` |
-| riscv-formal (37 instructions + reg, pc_fwd, pc_bwd, causal, unique, liveness, ill, cover) | **45/45 PASS** | `make formal` |
-| Timing properties T1–T3 (ours, beyond riscv-formal) | PASS (BMC depth 24) + all covers reached | `make formal` |
+| `hello` firmware in the SoC | PASS, 3958 cycles (rabbit3: 3145, CV32E40P: 3450 with HW mul/div) | `make soc-sim CORE=rabbit5` |
+| riscv-formal (37 instructions + reg, pc_fwd, pc_bwd, causal, unique, liveness, ill, cover) | **45/45 PASS** | `make formal CORE=rabbit5` |
+| Timing properties T1–T3 (ours, beyond riscv-formal) | PASS (BMC depth 24) + all covers reached | `make formal CORE=rabbit5` |
 | Gate-level smoke test (Yosys generic gates) | PASS, **same 3958 cycles** as RTL | `make gls-smoke CORE=rabbit5` |
 | Verilator `-Wall` lint | clean | `make lint CORE=rabbit5` |
-| Size (Yosys generic synthesis, core + adapter) | ≈ 10.9 k cells | `make gls-netlist CORE=rabbit5` |
+| Size (Yosys generic synthesis, core + adapter) | ≈ 11.1 k cells | `make gls-netlist CORE=rabbit5` |
 
-Whole formal suite: ~35 s on a 22-core machine.
+> Correction (2026-11-06): the first version of the timing testbench declared
+> its free inputs with `(* anyseq *)`, which the slang frontend silently
+> ignores — the instruction stream became a "don't care" constant instead of a
+> real input, so the first T1–T3 "PASS" was weaker than claimed. Found while
+> bringing up rabbit3 (an impossible counterexample); fixed by making the free
+> values top-level inputs, then re-proven and re-mutation-tested on both cores.
 
-## Reading order (≈ 1,000 lines of RTL, comments included)
+## Reading order
+
+Read **rabbit3 first** (`../rabbit3/README.md`): same blocks, simpler pipeline.
+Then:
 
 | # | File | Lines | What to understand |
 |---|---|---|---|
-| 1 | `rabbit5_pkg.sv` | ~110 | opcodes, ALU ops, the `decoded_t` struct, CSR numbers |
-| 2 | `rabbit5_alu.sv` | ~30 | nothing surprising — good warm-up |
-| 3 | `rabbit5_decoder.sv` | ~200 | 32 bits → `decoded_t`; what counts as *illegal* |
-| 4 | `rabbit5_regfile.sv` | ~35 | why the write-first bypass removes one hazard |
-| 5 | `rabbit5_core.sv` | ~500 | **the pipeline** — start with the TIMING RULES header |
-| 6 | `rabbit5_csr.sv` | ~130 | machine-mode CSRs, trap entry, MRET |
-| 7 | `../../../dv/formal/rabbit5/timing/rabbit5_timing_tb.sv` | ~170 | the timing properties T1–T3 |
-| 8 | `../../../dv/formal/rabbit5/wrapper.sv`, `checks.cfg` | | how riscv-formal sees the core |
+| 1 | `../rabbit_common/` (see its README) | ~800 | the shared blocks: decode, ALU, regfile, CSRs, `rabbit_execute`, RVFI |
+| 2 | `rabbit5_core.sv` | ~280 | **the pipeline only** — start with the TIMING RULES header; compare with `rabbit3_core.sv` |
+| 3 | `../../../dv/formal/rabbit/timing/rabbit_timing_tb.sv` | ~170 | the timing properties T1–T3 (same file for every core) |
+| 4 | `../../../dv/formal/rabbit/wrapper.sv`, `checks.cfg` | | how riscv-formal sees the core |
 
 ## The timing model (rules R1–R5, in `rabbit5_core.sv`)
 
@@ -65,7 +69,7 @@ Design choices you may want to change:
 Things to verify yourself (good first exercises):
 - [ ] Draw the pipeline diagram for `lw x1,0(x2); add x3,x1,x1` and check it against a waveform (`make soc-waves CORE=rabbit5`).
 - [ ] Find where `stall` and `redirect` interact (`assign stall = load_use && !redirect`) and convince yourself why the order matters.
-- [ ] Break something on purpose (e.g. swap the MEM/WB priority in `forward()`) and watch which formal check fails. We did this: only **`reg_ch0`** catches it — all 37 instruction checks still pass, because each instruction is correct *for the operands it was given*.
+- [ ] Break something on purpose (e.g. swap the MEM/WB priority in `forward()`) and watch which formal check fails (`make formal CORE=rabbit5`). We did this: only **`reg_ch0`** catches it — all 37 instruction checks still pass, because each instruction is correct *for the operands it was given*.
 
 ## Known limitations of v0
 

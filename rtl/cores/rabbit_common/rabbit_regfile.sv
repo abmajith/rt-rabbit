@@ -1,12 +1,12 @@
 // =============================================================================
-// rabbit5_regfile — 32 x 32-bit registers, 2 read ports, 1 write port
+// rabbit_regfile — 32 x 32-bit registers, 2 read ports, 1 write port
 // =============================================================================
 // x0 always reads as zero.
 // "Write-first" bypass: if WB writes a register in the same cycle that ID
 // reads it, ID sees the *new* value. This removes the WB->ID hazard, so the
 // EX-stage forwarding only has to look at MEM and WB.
 // =============================================================================
-module rabbit5_regfile (
+module rabbit_regfile (
   input  logic        clk_i,
   input  logic [4:0]  raddr_a_i,
   output logic [31:0] rdata_a_o,

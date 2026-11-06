@@ -36,6 +36,6 @@ sw/baremetal/build/
 **/sim_build_*/
 **/*.fst
 build/
-dv/formal/rabbit5/build/
-dv/formal/rabbit5/timing/timing_*/
-dv/formal/rabbit5/timing/timing/
+dv/formal/rabbit/build/
+dv/formal/rabbit/*.log
+dv/formal/rabbit/timing/timing*/

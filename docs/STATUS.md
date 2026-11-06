@@ -10,18 +10,19 @@
 | rma_analysis examples | `make rma-smoke` | 11 run, 1 expected failure |
 | GitHub Actions | `.github/workflows/ci.yml` | lint, soc-sim matrix, ip-test matrix, rma-smoke |
 
-## rabbit5 (own core) — M0 done on branch `rabbit5-m0`
+## Own cores: rabbit3 and rabbit5 (shared blocks in rtl/cores/rabbit_common)
 
-| Item | Command | Result |
+| Item | rabbit3 (3-stage) | rabbit5 (5-stage) |
 |---|---|---|
-| hello on rabbit5 (RV32I, 5-stage) | `make soc-sim CORE=rabbit5` | PASS, 3958 cycles |
-| riscv-formal | `make formal` | 45/45 PASS |
-| timing properties T1–T3 + covers | `make formal` | PASS (BMC 24) |
-| gate-level smoke (Yosys generic netlist) | `make gls-smoke CORE=rabbit5` | PASS, same 3958 cycles |
+| hello (`make soc-sim CORE=...`) | PASS, 3145 cycles | PASS, 3958 cycles |
+| riscv-formal (`make formal CORE=...`) | 45/45 | 45/45 |
+| timing properties T1–T3 + covers | PASS | PASS |
+| gate-level smoke (`make gls-smoke CORE=...`) | PASS, same cycles | PASS, same cycles |
+| size, Yosys generic gates | 10.3 k cells | 11.1 k cells |
 
 Next (M1/M2): enable riscv-formal CSR checks, timer + external interrupt with a
 proven entry-latency bound, RISCOF compliance, then the dual-core TDM work (M4).
-Review guide: `rtl/cores/rabbit5/README.md`.
+Learning path: `rtl/cores/rabbit3/README.md`.
 
 ## Known issues
 

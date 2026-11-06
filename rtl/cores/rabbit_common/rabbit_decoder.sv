@@ -1,12 +1,12 @@
 // =============================================================================
-// rabbit5_decoder — instruction bits -> decoded_t   (pure combinational)
+// rabbit_decoder — instruction bits -> decoded_t   (pure combinational)
 // =============================================================================
 // Supported: all of RV32I, plus FENCE and WFI (both executed as no-ops),
 // ECALL, EBREAK, MRET and the six Zicsr instructions.
 // Anything else sets `illegal`; the EX stage turns that into a trap.
 // =============================================================================
-module rabbit5_decoder
-  import rabbit5_pkg::*;
+module rabbit_decoder
+  import rabbit_pkg::*;
 (
   input  logic [31:0] instr_i,
   output decoded_t    dec_o

@@ -49,7 +49,9 @@ adapter, in `rtl/soc/`.
 | `cv32e40p/` | OpenHW CV32E40P v1.8.3 (RV32IMC, 4-stage) | **working** | Baseline for Y1 |
 | `ibex/` | lowRISC Ibex | planned | Same OBI-like bus, 2/3-stage; good for area comparison |
 | `cv32e40x/` | OpenHW CV32E40X | planned | Brings CV-X-IF for the vector/NN coprocessor |
-| `rabbit5/` | Our own 5-stage, timing-predictable RV32I core | **working (v0)** | riscv-formal 45/45, timing properties, GLS smoke — see its README |
+| `rabbit3/` | Our own 3-stage RV32I core (F/X/W) — **start here** | **working** | riscv-formal 45/45, timing properties, GLS smoke |
+| `rabbit5/` | Our own 5-stage, timing-predictable RV32I core | **working** | riscv-formal 45/45, timing properties, GLS smoke |
+| `rabbit_common/` | Blocks shared by rabbit3 and rabbit5 (decoder, ALU, regfile, CSRs, execute, RVFI) | — | not a core; listed in each core's `files.f` |
 
 The contract will grow (v1) with an optional **coprocessor port** (CV-X-IF
 style) and an optional **RVFI trace port** for lockstep checking against Spike/Sail.

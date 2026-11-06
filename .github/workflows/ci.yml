@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        core: [cv32e40p, rabbit5]
+        core: [cv32e40p, rabbit3, rabbit5]
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        core: [cv32e40p, rabbit5]
+        core: [cv32e40p, rabbit3, rabbit5]
         prog: [hello]
     steps:
       - name: RISC-V GCC
@@ -68,51 +68,66 @@ jobs:
       - working-directory: hw_ip/sim
         run: uv run make TARGET=${{ matrix.target }}   # non-zero exit on any failed test
 
-  # riscv-formal (45 checks) + rabbit5 timing properties. ~1 min on 4 cores.
+  # riscv-formal (45 checks) + timing properties, for each of our own cores.
   formal:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [rabbit3, rabbit5]
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
       - uses: YosysHQ/setup-oss-cad-suite@v3
         with: { version: "2026-11-04" }     # pinned: yosys, sby, boolector
       - run: yosys -V && sby --version
-      - run: make formal
+      - run: make formal CORE=${{ matrix.core }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: formal-results
+          name: formal-results-${{ matrix.core }}
           path: |
-            dv/formal/rabbit5/build/riscv-formal/cores/rabbit5/checks/*/logfile.txt
-            dv/formal/rabbit5/build/riscv-formal/cores/rabbit5/checks/*/engine_0/*.vcd
-            dv/formal/rabbit5/timing/timing_*/logfile.txt
-            dv/formal/rabbit5/timing/timing_*/engine_0/*.vcd
+            dv/formal/rabbit/build/${{ matrix.core }}/riscv-formal/cores/${{ matrix.core }}/checks/*/logfile.txt
+            dv/formal/rabbit/build/${{ matrix.core }}/riscv-formal/cores/${{ matrix.core }}/checks/*/engine_0/*.vcd
+            dv/formal/rabbit/build/${{ matrix.core }}/timing_*/logfile.txt
+            dv/formal/rabbit/build/${{ matrix.core }}/timing_*/engine_0/*.vcd
 
   # Gate-level smoke test: Yosys builds the netlist, the pinned Verilator image runs it.
   gls-netlist:
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        core: [rabbit3, rabbit5]
     steps:
       - uses: actions/checkout@v4
       - uses: YosysHQ/setup-oss-cad-suite@v3
         with: { version: "2026-11-04" }
-      - run: make gls-netlist CORE=rabbit5
+      - run: make gls-netlist CORE=${{ matrix.core }}
       - uses: actions/upload-artifact@v4
-        with: { name: gls-netlist-rabbit5, path: build/gls/rabbit5 }
+        with:
+          name: gls-netlist-${{ matrix.core }}
+          path: build/gls/${{ matrix.core }}
 
   gls-smoke:
     needs: gls-netlist
     runs-on: ubuntu-24.04
     container: { image: "verilator/verilator:v5.054", options: --entrypoint "" }
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [rabbit3, rabbit5]
     steps:
       - name: RISC-V GCC
         run: apt-get update -q && apt-get install -y -q gcc-riscv64-unknown-elf libpython3.12-dev
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - uses: actions/download-artifact@v4
-        with: { name: gls-netlist-rabbit5, path: build/gls/rabbit5 }
+        with:
+          name: gls-netlist-${{ matrix.core }}
+          path: build/gls/${{ matrix.core }}
       - run: uv sync
       - working-directory: dv/cocotb/soc
-        run: uv run make CORE=rabbit5 PROG=hello GLS=1
+        run: uv run make CORE=${{ matrix.core }} PROG=hello GLS=1
 
   rma-smoke:
     runs-on: ubuntu-24.04
