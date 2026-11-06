@@ -38,6 +38,13 @@ module rabbit_cpu #(
 );
 ```
 
+Interrupt contract (all cores): `irq_i[i]` is a **level-sensitive** request for
+line `i` (= bit `i` of `mip`/`mie`); the handler clears the source in the
+peripheral. Priority 31 > … > 16 > 11 > 3 > 7 and vectored `mtvec` at reset
+(as in CV32E40P), so the same firmware runs everywhere. `irq_ack_o`/`irq_id_o`
+are CV32E40P extras; rabbit cores tie them to 0. `core_sleep_o` = 1 while the
+core sleeps in WFI (for clock gating).
+
 Why OBI? It is the native bus of CV32E40P, Ibex and CVE4 cores. Wishbone
 (our `hw_ip/` peripherals) and AXI/LiteX buses are bridged *outside* the core
 adapter, in `rtl/soc/`.
@@ -49,8 +56,8 @@ adapter, in `rtl/soc/`.
 | `cv32e40p/` | OpenHW CV32E40P v1.8.3 (RV32IMC, 4-stage) | **working** | Baseline for Y1 |
 | `ibex/` | lowRISC Ibex | planned | Same OBI-like bus, 2/3-stage; good for area comparison |
 | `cv32e40x/` | OpenHW CV32E40X | planned | Brings CV-X-IF for the vector/NN coprocessor |
-| `rabbit3/` | Our own 3-stage RV32I core (F/X/W) — **start here** | **working** | riscv-formal 45/45, timing properties, GLS smoke |
-| `rabbit5/` | Our own 5-stage, timing-predictable RV32I core | **working** | riscv-formal 45/45, timing properties, GLS smoke |
+| `rabbit3/` | Our own 3-stage RV32I core (F/X/W) — **start here** | **working** | riscv-formal 45/45, timing + interrupt properties, interrupts + WFI, GLS smoke |
+| `rabbit5/` | Our own 5-stage, timing-predictable RV32I core | **working** | riscv-formal 45/45, timing + interrupt properties, interrupts + WFI, GLS smoke |
 | `rabbit_common/` | Blocks shared by rabbit3 and rabbit5 (decoder, ALU, regfile, CSRs, execute, RVFI) | — | not a core; listed in each core's `files.f` |
 
 The contract will grow (v1) with an optional **coprocessor port** (CV-X-IF

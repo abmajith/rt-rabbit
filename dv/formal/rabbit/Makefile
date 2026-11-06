@@ -39,12 +39,14 @@ $(FLAT): $(SOURCES)
 	             hierarchy -top $(CORE)_core; proc; flatten; opt_clean; \
 	             write_verilog -noattr $@"
 
-$(CORE_DIR)/checks/makefile: $(FLAT) checks.cfg wrapper.sv
+$(CORE_DIR)/checks/makefile: $(FLAT) checks.cfg wrapper.sv $(REPO)/rtl/cores/$(CORE)/core.mk
 	@mkdir -p $(MIRROR) $(CORE_DIR)
 	ln -sfn $(RF_SRC)/checks $(MIRROR)/checks
 	ln -sfn $(RF_SRC)/insns  $(MIRROR)/insns
 	cp $(FLAT) wrapper.sv $(CORE_DIR)/
-	sed -e 's/@RABBIT_CORE@/$(CORE)_core/' checks.cfg > $(CORE_DIR)/checks.cfg
+	sed -e 's/@RABBIT_CORE@/$(CORE)_core/' \
+	    -e 's/@RABBIT_IRQ_DEFINE@/$(if $(filter-out 0,$(TIMING_IRQ_LATENCY)),`define RABBIT_HAS_IRQ)/' \
+	    checks.cfg > $(CORE_DIR)/checks.cfg
 	rm -rf $(CORE_DIR)/checks
 	cd $(CORE_DIR) && python3 ../../checks/genchecks.py
 
@@ -58,12 +60,14 @@ check: generate
 TIMING_DEFINES := -DSYNTHESIS -DRABBIT_CORE=$(CORE)_core \
                   -DFIRST_RETIRE=$(TIMING_FIRST_RETIRE) \
                   -DREDIRECT_GAP=$(TIMING_REDIRECT_GAP) \
-                  -DLOADUSE_GAP=$(TIMING_LOADUSE_GAP)
+                  -DLOADUSE_GAP=$(TIMING_LOADUSE_GAP) \
+                  -DIRQ_LATENCY=$(TIMING_IRQ_LATENCY) \
+                  -DCOMMIT_TO_RETIRE=$(TIMING_COMMIT_TO_RETIRE)
 
 timing: $(BUILD)/timing.sby
 	cd $(BUILD) && sby -f timing.sby
 
-$(BUILD)/timing.sby: timing/timing.sby.in timing/rabbit_timing_tb.sv $(SOURCES)
+$(BUILD)/timing.sby: timing/timing.sby.in timing/rabbit_timing_tb.sv $(SOURCES) $(REPO)/rtl/cores/$(CORE)/core.mk
 	@mkdir -p $(BUILD)
 	@if [ -n "$(YOSYS_SLANG)" ]; then echo "plugin -i slang" > $(BUILD)/slang_load.ys; \
 	 else echo "# slang is built in" > $(BUILD)/slang_load.ys; fi

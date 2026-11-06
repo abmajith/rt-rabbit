@@ -35,7 +35,8 @@ jobs:
       fail-fast: false
       matrix:
         core: [cv32e40p, rabbit3, rabbit5]
-        prog: [hello]
+        # irq: interrupt self-test; cv32e40p is the reference the rabbits must match
+        prog: [hello, irq]
     steps:
       - name: RISC-V GCC
         run: apt-get update -q && apt-get install -y -q gcc-riscv64-unknown-elf libpython3.12-dev
@@ -71,6 +72,8 @@ jobs:
   # riscv-formal (45 checks) + timing properties, for each of our own cores.
   formal:
     runs-on: ubuntu-24.04
+    # locally: riscv-formal 3 min (rabbit3) / 0.5 min (rabbit5), timing ~15 min each
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -128,6 +131,8 @@ jobs:
       - run: uv sync
       - working-directory: dv/cocotb/soc
         run: uv run make CORE=${{ matrix.core }} PROG=hello GLS=1
+      - working-directory: dv/cocotb/soc
+        run: uv run make CORE=${{ matrix.core }} PROG=irq GLS=1
 
   rma-smoke:
     runs-on: ubuntu-24.04

@@ -71,6 +71,7 @@ package rabbit_pkg;
     logic        is_ecall;
     logic        is_ebreak;
     logic        is_mret;
+    logic        is_wfi;
   } decoded_t;
 
   // ---------------------------------------------------------------------------
@@ -78,11 +79,13 @@ package rabbit_pkg;
   // ---------------------------------------------------------------------------
   localparam logic [11:0] CSR_MSTATUS  = 12'h300;
   localparam logic [11:0] CSR_MISA     = 12'h301;
+  localparam logic [11:0] CSR_MIE      = 12'h304;
   localparam logic [11:0] CSR_MTVEC    = 12'h305;
   localparam logic [11:0] CSR_MSCRATCH = 12'h340;
   localparam logic [11:0] CSR_MEPC     = 12'h341;
   localparam logic [11:0] CSR_MCAUSE   = 12'h342;
   localparam logic [11:0] CSR_MTVAL    = 12'h343;
+  localparam logic [11:0] CSR_MIP      = 12'h344;
   localparam logic [11:0] CSR_MCYCLE   = 12'hB00;
   localparam logic [11:0] CSR_MINSTRET = 12'hB02;
   localparam logic [11:0] CSR_MCYCLEH  = 12'hB80;
@@ -91,6 +94,34 @@ package rabbit_pkg;
 
   // misa: MXL=1 (32-bit), extension I only
   localparam logic [31:0] MISA_VALUE = 32'h4000_0100;
+
+  // ---------------------------------------------------------------------------
+  // Interrupts. Line i of irq_i is bit i of mip and mie (RISC-V standard
+  // layout, same as CV32E40P, so the same firmware runs on every core):
+  //   3 = MSI (software), 7 = MTI (timer), 11 = MEI (external),
+  //   16..31 = local / "fast" lines for robot peripherals (encoder, PWM, ...)
+  // ---------------------------------------------------------------------------
+  localparam logic [31:0] IRQ_MASK = 32'hFFFF_0888;
+
+  // Which pending line is taken first (CV32E40P order):
+  // 31 > 30 > ... > 16 > 11 (MEI) > 3 (MSI) > 7 (MTI)
+  function automatic logic [4:0] irq_priority(input logic [31:0] pending);
+    for (int i = 31; i >= 16; i--) if (pending[i]) return 5'(i);
+    if (pending[11]) return 5'd11;
+    if (pending[3])  return 5'd3;
+    return 5'd7;     // also the answer when nothing is pending (unused then)
+  endfunction
+
+  // Where a trap goes. mtvec[0] selects the mode:
+  //   0 = direct:   every trap jumps to the base
+  //   1 = vectored: interrupt i jumps to base + 4*i, exceptions to the base
+  function automatic logic [31:0] trap_target(input logic [31:0] mtvec,
+                                              input logic        is_irq,
+                                              input logic [4:0]  irq_id);
+    logic [31:0] base;
+    base = {mtvec[31:2], 2'b00};
+    return (is_irq && mtvec[0]) ? base + {25'b0, irq_id, 2'b00} : base;
+  endfunction
 
   // ---------------------------------------------------------------------------
   // exec_t: everything known about an instruction once it has been executed.
@@ -103,6 +134,7 @@ package rabbit_pkg;
     logic [31:0] instr;
     logic [31:0] next_pc;     // where the program goes after this instruction
     logic        trap;        // trapped: no register write, no memory access
+    logic        intr;        // first instruction of an interrupt handler (RVFI)
     logic        writes_rd;
     logic [4:0]  rd;
     logic [31:0] result;      // ALU / link / CSR value (loads: replaced at retirement)
@@ -183,5 +215,6 @@ package rabbit_pkg;
   localparam logic [31:0] CAUSE_LOAD_MISALIGNED  = 32'd4;
   localparam logic [31:0] CAUSE_STORE_MISALIGNED = 32'd6;
   localparam logic [31:0] CAUSE_ECALL_M          = 32'd11;
+  // interrupts: mcause = {1, 26'b0, line number}
 
 endpackage

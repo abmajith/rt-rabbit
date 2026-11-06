@@ -37,6 +37,7 @@ module rabbit_cpu #(
       .data_req_o, .data_gnt_i, .data_rvalid_i, .data_we_o, .data_be_o,
       .data_addr_o, .data_wdata_o, .data_rdata_i,
       .irq_i,
+      .core_sleep_o,
       // RVFI is only used by formal and trace tools
       .rvfi_valid(), .rvfi_order(), .rvfi_insn(), .rvfi_trap(), .rvfi_halt(),
       .rvfi_intr(), .rvfi_mode(), .rvfi_ixl(), .rvfi_rs1_addr(), .rvfi_rs2_addr(),
@@ -45,10 +46,11 @@ module rabbit_cpu #(
       .rvfi_mem_wmask(), .rvfi_mem_rdata(), .rvfi_mem_wdata()
   );
 
-  // v0 has no interrupts and no debug module
+  // irq_ack_o / irq_id_o (CV32E40P's acknowledge handshake) are not needed:
+  // rabbit interrupts are level-sensitive, the handler clears the source.
+  // No debug module yet.
   assign irq_ack_o    = 1'b0;
   assign irq_id_o     = 5'd0;
-  assign core_sleep_o = 1'b0;
   logic unused;
   assign unused = debug_req_i;
 endmodule

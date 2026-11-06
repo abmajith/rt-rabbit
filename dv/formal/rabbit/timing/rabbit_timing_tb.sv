@@ -12,6 +12,8 @@
 //   FIRST_RETIRE   cycle of the first retirement after reset (5 / 3)
 //   REDIRECT_GAP   cycles between a redirecting instruction and the next (3 / 2)
 //   LOADUSE_GAP    cycles between a load and an instruction using it    (2 / 1)
+//   IRQ_LATENCY    worst-case interrupt latency, 0 = no interrupts      (7 / 4)
+//   COMMIT_TO_RETIRE  cycles from the commit stage to retirement        (2 / 1)
 //
 //   T1  exact timing model: the gap between two consecutive retirements is
 //         REDIRECT_GAP  if the earlier instruction changed control flow
@@ -22,11 +24,31 @@
 //   T2  the first instruction retires exactly FIRST_RETIRE cycles after reset
 //   T3  a data-memory request happens exactly one cycle before the instruction
 //       that made it retires, and never at any other time            [rule R4]
+//   T4  after WFI sleep, the next instruction retires FIRST_RETIRE-1 cycles
+//       after the last sleeping cycle, in which fetch restarts ("waking up is
+//       like leaving reset": that cycle plays the role of cycle 0)
 //
-// The solver picks ANY instruction word and ANY load data every cycle.
+// Interrupts (only if the core declares IRQ_LATENCY > 0):
+//   I1  bounded latency: an enabled interrupt that stays pending makes the
+//       first handler instruction retire within IRQ_LATENCY cycles
+//   I2  no spurious interrupts: an interrupt is only taken if one was pending
+//       and enabled
+//   I3  precise: mepc, as read by the handler, is the pc of the instruction
+//       that should have run next (so MRET resumes the program exactly there)
+//   I4  mcause, as read by the handler, says "interrupt" and names a line that
+//       really was pending and enabled (in vectored mode: the line whose
+//       vector the core jumped to)
+//   I5  the handler starts at the right address: mtvec base (direct mode) or
+//       base + 4*line for a requested line (vectored mode)
+// Sleep (WFI), for power:
+//   W0  the core only falls asleep when a WFI retires
+//   W1  it wakes in the cycle after an enabled interrupt becomes pending
+//   W2  while asleep nothing moves: no retirement, no data access, no fetch
+//
+// The solver picks ANY instruction word, ANY load data and ANY interrupt lines
+// every cycle.
 //
 // Ideas for properties to add next (robotics / real-time):
-//   - bounded interrupt latency, once interrupts exist (M2)
 //   - for the dual core (M4): core 0's T1 gaps never depend on core 1
 // =============================================================================
 module rabbit_timing_tb (
@@ -37,39 +59,64 @@ module rabbit_timing_tb (
     // the signal would become a "don't care" constant that the solver may
     // choose differently at every place it is used.
     input logic [31:0] instr_rdata,
-    input logic [31:0] data_rdata
+    input logic [31:0] data_rdata,
+    input logic [31:0] irq
 );
   localparam int FIRST_RETIRE = `FIRST_RETIRE;
   localparam int REDIRECT_GAP = `REDIRECT_GAP;
   localparam int LOADUSE_GAP  = `LOADUSE_GAP;
+  localparam int IRQ_LATENCY  = `IRQ_LATENCY;
+`ifndef COMMIT_TO_RETIRE
+`define COMMIT_TO_RETIRE 1
+`endif
+  // The spec model below learns about an instruction when it retires; the
+  // core acted on it in its commit stage. D = the extra cycles beyond the one
+  // the model already accounts for (rabbit3: 0, rabbit5: 1). Signals of the
+  // core's "now" are delayed by D before being compared with the model.
+  localparam int D = `COMMIT_TO_RETIRE - 1;
+  localparam logic [31:0] IRQ_MASK = 32'hFFFF_0888;   // lines that exist
 
   // ---- reset for exactly the first cycle -------------------------------------
   logic rst_n = 1'b0;
   always_ff @(posedge clk) rst_n <= 1'b1;
 
-  logic        data_req;
-  logic        rvfi_valid, rvfi_trap;
-  logic [31:0] rvfi_insn, rvfi_rs1_rdata, rvfi_rs2_rdata;
+  logic        data_req, instr_req, core_sleep;
+  logic        rvfi_valid, rvfi_trap, rvfi_intr;
+  logic [31:0] rvfi_insn, rvfi_rs1_rdata, rvfi_rs2_rdata, rvfi_rd_wdata, rvfi_pc_wdata, rvfi_pc_rdata;
   logic [4:0]  rvfi_rs1_addr, rvfi_rs2_addr, rvfi_rd_addr;
   logic [3:0]  rvfi_mem_rmask, rvfi_mem_wmask;
 
   `RABBIT_CORE dut (
       .clk_i(clk), .rst_ni(rst_n), .fetch_enable_i(1'b1),
-      .instr_req_o(), .instr_gnt_i(1'b1), .instr_rvalid_i(1'b1),
+      .instr_req_o(instr_req), .instr_gnt_i(1'b1), .instr_rvalid_i(1'b1),
       .instr_addr_o(), .instr_rdata_i(instr_rdata),
       .data_req_o(data_req), .data_gnt_i(1'b1), .data_rvalid_i(1'b1),
       .data_we_o(), .data_be_o(), .data_addr_o(), .data_wdata_o(),
       .data_rdata_i(data_rdata),
-      .irq_i(32'b0),
+      .irq_i(irq), .core_sleep_o(core_sleep),
       .rvfi_valid(rvfi_valid), .rvfi_order(), .rvfi_insn(rvfi_insn),
-      .rvfi_trap(rvfi_trap), .rvfi_halt(), .rvfi_intr(), .rvfi_mode(), .rvfi_ixl(),
+      .rvfi_trap(rvfi_trap), .rvfi_halt(), .rvfi_intr(rvfi_intr), .rvfi_mode(), .rvfi_ixl(),
       .rvfi_rs1_addr(rvfi_rs1_addr), .rvfi_rs2_addr(rvfi_rs2_addr),
       .rvfi_rs1_rdata(rvfi_rs1_rdata), .rvfi_rs2_rdata(rvfi_rs2_rdata),
-      .rvfi_rd_addr(rvfi_rd_addr), .rvfi_rd_wdata(),
-      .rvfi_pc_rdata(), .rvfi_pc_wdata(), .rvfi_mem_addr(),
+      .rvfi_rd_addr(rvfi_rd_addr), .rvfi_rd_wdata(rvfi_rd_wdata),
+      .rvfi_pc_rdata(rvfi_pc_rdata), .rvfi_pc_wdata(rvfi_pc_wdata), .rvfi_mem_addr(),
       .rvfi_mem_rmask(rvfi_mem_rmask), .rvfi_mem_wmask(rvfi_mem_wmask),
       .rvfi_mem_rdata(), .rvfi_mem_wdata()
   );
+
+  // ---- core signals delayed by D cycles (see D above) -------------------------
+  logic [31:0] irq_hist   [4];
+  logic        sleep_hist [4];
+  always_ff @(posedge clk) begin
+    irq_hist[0]   <= irq;        sleep_hist[0] <= core_sleep;
+    for (int k = 1; k < 4; k++) begin
+      irq_hist[k] <= irq_hist[k-1]; sleep_hist[k] <= sleep_hist[k-1];
+    end
+  end
+  logic [31:0] irq_d;     // irq as the core saw it D cycles ago
+  logic        sleep_d;   // core_sleep, D cycles ago
+  assign irq_d   = (D == 0) ? irq        : irq_hist[D-1];
+  assign sleep_d = (D == 0) ? core_sleep : sleep_hist[D-1];
 
   // ---- classify the instruction that retires now ------------------------------
   // (the ISA-level meaning only; nothing about how the core is built)
@@ -91,37 +138,65 @@ module rabbit_timing_tb (
     endcase
   end
 
-  logic changes_flow, is_load;
+  logic is_mret, is_wfi, changes_flow, is_load;
+  assign is_mret = (rvfi_insn == 32'h3020_0073);
+  assign is_wfi  = (rvfi_insn == 32'h1050_0073);
   assign changes_flow = rvfi_trap
                      || opcode == 7'b1101111                         // JAL
                      || opcode == 7'b1100111                         // JALR
-                     || rvfi_insn == 32'h3020_0073                   // MRET
+                     || is_mret || is_wfi                            // WFI = jump to pc+4
                      || (opcode == 7'b1100011 && branch_taken);      // taken branch
   assign is_load = (opcode == 7'b0000011) && !rvfi_trap;
 
+  // CSR instructions (the ISA meaning: old value -> rd, then write)
+  logic        is_csr, csr_writes;
+  logic [11:0] csr_addr;
+  logic [31:0] csr_src;
+  assign is_csr     = (opcode == 7'b1110011) && (funct3[1:0] != 2'b00) && !rvfi_trap;
+  assign csr_addr   = rvfi_insn[31:20];
+  assign csr_src    = funct3[2] ? {27'b0, rvfi_insn[19:15]} : rvfi_rs1_rdata;
+  assign csr_writes = is_csr && (funct3[1:0] == 2'b01 || rvfi_insn[19:15] != 5'd0);
+
+  function automatic logic [31:0] csr_new(input logic [31:0] old);
+    unique case (funct3[1:0])
+      2'b01  : return csr_src;
+      2'b10  : return old |  csr_src;
+      default: return old & ~csr_src;
+    endcase
+  endfunction
+
   // ---- remember the previous retirement --------------------------------------------
-  logic       seen_one;       // at least one instruction has retired
-  logic       prev_flow;      // previous instruction changed control flow
-  logic       prev_load;      // previous instruction was a load ...
-  logic [4:0] prev_rd;        // ... into this register (0 = none)
-  int         gap;            // cycles since the previous retirement
-  int         cycle;          // cycles since reset was released
+  logic        seen_one;      // at least one instruction has retired
+  logic        prev_flow;     // previous instruction changed control flow
+  logic        prev_load;     // previous instruction was a load ...
+  logic [4:0]  prev_rd;       // ... into this register (0 = none)
+  logic [31:0] prev_pc_wdata; // ... and where the program went after it
+  int          gap;           // cycles since the previous retirement
+  int          cycle;         // cycles since reset was released
+  logic        slept;         // the core slept since the previous retirement
+  int          since_sleep;   // cycles since the last sleeping cycle, minus 1
 
   always_ff @(posedge clk) begin
     if (!rst_n) begin
-      seen_one <= 1'b0;
-      gap      <= 0;
-      cycle    <= 0;
+      seen_one    <= 1'b0;
+      gap         <= 0;
+      cycle       <= 0;
+      slept       <= 1'b0;
+      since_sleep <= 0;
     end else begin
-      cycle <= cycle + 1;
+      cycle       <= cycle + 1;
+      since_sleep <= sleep_d ? 0 : since_sleep + 1;
       if (rvfi_valid) begin
-        seen_one  <= 1'b1;
-        prev_flow <= changes_flow;
-        prev_load <= is_load;
-        prev_rd   <= rvfi_rd_addr;
-        gap       <= 1;
+        seen_one      <= 1'b1;
+        prev_flow     <= changes_flow;
+        prev_load     <= is_load;
+        prev_rd       <= rvfi_rd_addr;
+        prev_pc_wdata <= rvfi_pc_wdata;
+        gap           <= 1;
+        slept         <= sleep_d;
       end else begin
-        gap <= gap + 1;
+        gap   <= gap + 1;
+        slept <= slept || sleep_d;
       end
     end
   end
@@ -133,11 +208,13 @@ module rabbit_timing_tb (
   int expected_gap;
   assign expected_gap = prev_flow ? REDIRECT_GAP : (load_use ? LOADUSE_GAP : 1);
 
-  // ---- T1, T2 ------------------------------------------------------------------------
+  // ---- T1, T2, T4 --------------------------------------------------------------------
+  // An interrupt removes an instruction from the pipeline; its timing is I1.
   always_comb begin
-    if (rst_n && rvfi_valid) begin
-      if (seen_one) assert (gap == expected_gap);          // T1
-      else          assert (cycle == FIRST_RETIRE - 1);    // T2 (cycle counts from 0)
+    if (rst_n && rvfi_valid && !rvfi_intr) begin
+      if (!seen_one)  assert (cycle == FIRST_RETIRE - 1);        // T2 (cycle counts from 0)
+      else if (slept) assert (since_sleep + 1 + D == FIRST_RETIRE - 1); // T4
+      else            assert (gap == expected_gap);              // T1
     end
     if (rst_n && !seen_one) assert (cycle < FIRST_RETIRE); // T2: nothing is late
   end
@@ -149,6 +226,158 @@ module rabbit_timing_tb (
   always_comb begin
     if (rst_n) assert (data_req_q == (rvfi_valid && (rvfi_mem_rmask != 0 || rvfi_mem_wmask != 0)));
   end
+
+  // ---- interrupt-enable state: a spec model computed from RVFI only -------------------
+  // m_* = state after every instruction that has retired before this cycle,
+  // n_* = ... including the one retiring now. A core changes its CSRs in the
+  // commit stage, COMMIT_TO_RETIRE cycles before retirement, so n_* is what
+  // the core's commit stage saw D cycles ago (rabbit3: exactly now).
+  logic        m_mie, m_mpie, n_mie, n_mpie;     // mstatus.MIE / MPIE
+  logic [31:0] m_ie, n_ie;                       // the mie CSR
+  logic [31:0] m_tvec, n_tvec;                   // mtvec (bit 0 = vectored)
+  always_comb begin
+    n_mie = m_mie; n_mpie = m_mpie; n_ie = m_ie; n_tvec = m_tvec;
+    if (rvfi_valid) begin
+      if (rvfi_intr) begin n_mpie = n_mie; n_mie = 1'b0; end  // entry came before it
+      if (rvfi_trap) begin n_mpie = n_mie; n_mie = 1'b0; end
+      else if (is_mret) begin n_mie = n_mpie; n_mpie = 1'b1; end
+      else if (csr_writes && csr_addr == 12'h300) begin
+        n_mie  = csr_new({24'b0, n_mpie, 3'b0, n_mie, 3'b0})[3];
+        n_mpie = csr_new({24'b0, n_mpie, 3'b0, n_mie, 3'b0})[7];
+      end
+      else if (csr_writes && csr_addr == 12'h304) n_ie = csr_new(n_ie) & IRQ_MASK;
+      else if (csr_writes && csr_addr == 12'h305) n_tvec = csr_new(n_tvec) & 32'hFFFF_FFFD;
+    end
+  end
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      m_mie <= 1'b0; m_mpie <= 1'b0; m_ie <= '0;
+      m_tvec <= 32'h0000_0001;      // MTVEC_ADDR = 0 (core default), vectored
+    end else begin
+      m_mie <= n_mie; m_mpie <= n_mpie; m_ie <= n_ie; m_tvec <= n_tvec;
+    end
+  end
+
+  // In the model's time frame (D cycles behind the core):
+  logic [31:0] enabled_lines;   // lines asking AND allowed by mie
+  logic        pend_en;         // ... and interrupts globally enabled
+  assign enabled_lines = irq_d & n_ie & IRQ_MASK;
+  assign pend_en       = rst_n && enabled_lines != 0 && n_mie;
+  // While the core sleeps no instruction is in flight, so the model is exact
+  // and the sleep checks use the core's own time frame:
+  logic        wake_cond;       // an enabled line is asking now
+  assign wake_cond     = rst_n && (irq & n_ie & IRQ_MASK) != 0;
+
+  // ---- W0..W2: sleep --------------------------------------------------------------------
+  logic sleep_q = 1'b0, sleep_d_q = 1'b0, wake_q = 1'b0;
+  always_ff @(posedge clk) begin
+    sleep_q <= core_sleep; sleep_d_q <= sleep_d; wake_q <= wake_cond;
+  end
+  always_comb begin
+    if (rst_n) begin
+      if (sleep_d && !sleep_d_q)    assert (rvfi_valid && is_wfi);         // W0
+      if (sleep_q && wake_q)        assert (!core_sleep);                  // W1
+      if (sleep_d && sleep_d_q)     assert (!rvfi_valid);                  // W2
+      if (core_sleep && sleep_q)    assert (!data_req);                    // W2
+      if (core_sleep && !wake_cond) assert (!instr_req);                   // W2
+    end
+  end
+
+  generate if (IRQ_LATENCY > 0) begin : g_irq
+    // ---- I1, I2: latency and no spurious interrupts ----------------------------------
+    int          wait_cycles;   // consecutive cycles an enabled interrupt was pending
+    logic        requested;     // ... at least one since the last interrupt
+    logic [31:0] req_lines;     // which lines that were
+    // An interrupt retiring ends the old request; a new one may already be
+    // pending in the same cycle (a handler that re-enables interrupts at once).
+    logic restart;
+    assign restart = rvfi_valid && rvfi_intr;
+    always_ff @(posedge clk) begin
+      if (!rst_n) begin
+        wait_cycles <= 0;
+        requested   <= 1'b0;
+        req_lines   <= '0;
+      end else begin
+        wait_cycles <= pend_en ? (restart ? 1 : wait_cycles + 1) : 0;
+        requested   <= pend_en || (requested && !restart);
+        req_lines   <= (pend_en ? enabled_lines : '0) | (restart ? '0 : req_lines);
+      end
+    end
+    always_comb begin
+      if (rst_n) assert (wait_cycles + D <= IRQ_LATENCY);                 // I1
+      if (rst_n && rvfi_valid && rvfi_intr) assert (requested);            // I2
+    end
+
+    // ---- I5: where the handler starts --------------------------------------------------
+    // m_tvec is mtvec as the core saw it when it took the interrupt: every
+    // instruction retiring in between is older than the interrupted one.
+    logic [31:0] tvec_base, vec_off;
+    logic [4:0]  vec_line;      // vectored: the line whose vector was used
+    assign tvec_base = {m_tvec[31:2], 2'b00};
+    assign vec_off   = rvfi_pc_rdata - tvec_base;
+    assign vec_line  = vec_off[6:2];
+    always_comb begin
+      if (rst_n && rvfi_valid && rvfi_intr) begin
+        if (m_tvec[0]) assert (vec_off[31:7] == 0 && vec_off[1:0] == 0 &&   // I5
+                               req_lines[vec_line]);
+        else           assert (rvfi_pc_rdata == tvec_base);                   // I5
+      end
+    end
+    logic [4:0] line_taken, line_now;   // vectored mode: line of the last interrupt
+    logic       vectored_taken, vectored_now;
+    assign line_now     = (rvfi_valid && rvfi_intr) ? vec_line : line_taken;
+    assign vectored_now = (rvfi_valid && rvfi_intr) ? m_tvec[0] : vectored_taken;
+    always_ff @(posedge clk) begin
+      if (!rst_n) begin line_taken <= '0; vectored_taken <= 1'b0; end
+      else begin line_taken <= line_now; vectored_taken <= vectored_now; end
+    end
+
+    // ---- I3, I4: what the handler reads from mepc / mcause ---------------------------
+    logic        epc_valid, cause_valid;
+    logic [31:0] epc_expect, cause_lines;
+    logic        epc_v_now, cause_v_now;
+    logic [31:0] epc_now, lines_now;
+    assign epc_v_now   = (rvfi_valid && rvfi_intr) || epc_valid;
+    assign epc_now     = (rvfi_valid && rvfi_intr) ? prev_pc_wdata : epc_expect;
+    assign cause_v_now = (rvfi_valid && rvfi_intr) || cause_valid;
+    assign lines_now   = (rvfi_valid && rvfi_intr) ? req_lines : cause_lines;
+    always_ff @(posedge clk) begin
+      if (!rst_n) begin
+        epc_valid <= 1'b0; cause_valid <= 1'b0;
+      end else if (rvfi_valid) begin
+        epc_valid   <= epc_v_now   && !rvfi_trap && !(csr_writes && csr_addr == 12'h341);
+        cause_valid <= cause_v_now && !rvfi_trap && !(csr_writes && csr_addr == 12'h342);
+        epc_expect  <= epc_now;
+        cause_lines <= lines_now;
+      end
+    end
+    always_comb begin
+      if (rst_n && rvfi_valid && is_csr && rvfi_rd_addr != 0) begin
+        if (csr_addr == 12'h341 && epc_v_now)                              // I3
+          assert (rvfi_rd_wdata == epc_now);
+        if (csr_addr == 12'h342 && cause_v_now)                            // I4
+          assert (rvfi_rd_wdata[31] && rvfi_rd_wdata[30:5] == 0 &&
+                  lines_now[rvfi_rd_wdata[4:0]] &&
+                  (!vectored_now || rvfi_rd_wdata[4:0] == line_now));
+      end
+    end
+
+    // ---- non-vacuity ---------------------------------------------------------------------
+    always_comb begin
+      if (rst_n && rvfi_valid && rvfi_intr) begin
+        cover (wait_cycles + D == IRQ_LATENCY);   // the bound is reached (it is tight)
+        cover (wait_cycles + D == IRQ_LATENCY - 1);
+        cover (slept);                            // WFI woken by the interrupt it takes
+        cover (!m_tvec[0]);                       // direct mode is exercised too
+        cover (m_tvec[0] && vec_line != 7);       // ... and a vector other than the timer's
+      end
+      if (rst_n && rvfi_valid && is_csr && rvfi_rd_addr != 0) begin
+        cover (csr_addr == 12'h341 && epc_v_now);
+        cover (csr_addr == 12'h342 && cause_v_now);
+      end
+      if (rst_n && rvfi_valid && !rvfi_intr) cover (slept);  // T4 happens
+    end
+  end endgenerate
 
   // ---- throughput bounds ------------------------------------------------------------------
   // From T1 + T2: after the first retirement (cycle FIRST_RETIRE-1), one more

@@ -1,13 +1,26 @@
 // =============================================================================
-// rabbit_csr — machine-mode CSRs and trap state (v0: no interrupts)
+// rabbit_csr — machine-mode CSRs, trap state and the interrupt controller
 // =============================================================================
 // All CSR reads/writes and all trap bookkeeping happen for the instruction in
 // EX. EX is the "commit point": nothing after EX can trap, so an instruction
 // that leaves EX without a trap is guaranteed to retire.
 //
-// Implemented: mstatus (MIE, MPIE; MPP fixed to M), misa, mtvec (direct mode),
-// mscratch, mepc, mcause, mtval, mcycle[h], minstret[h], mhartid.
+// Implemented: mstatus (MIE, MPIE; MPP fixed to M), misa, mie, mip,
+// mtvec (direct or vectored), mscratch, mepc, mcause, mtval, mcycle[h],
+// minstret[h], mhartid.
 // Any other address -> illegal instruction (reported back to EX).
+//
+// Interrupts — two levels of "enable", as in the RISC-V spec:
+//   mip[i]        line i is asking            (= irq_i[i], read-only)
+//   mie[i]        line i is allowed           (per-line enable, software)
+//   mstatus.MIE   interrupts are allowed now  (global; cleared on trap entry)
+//
+//   irq_wake_o    = some line is asking AND allowed   -> ends WFI sleep
+//   irq_pending_o = irq_wake_o AND mstatus.MIE        -> take an interrupt
+//
+// The interrupt lines are NOT registered here: an irq_i edge can be taken in
+// the same cycle (lowest latency). The source must therefore be a flip-flop
+// in the clock domain of the core (the rabbit_timer and peripherals are).
 // =============================================================================
 module rabbit_csr
   import rabbit_pkg::*;
@@ -37,12 +50,27 @@ module rabbit_csr
   // Counting
   input  logic        instret_i,     // an instruction committed in EX this cycle
 
+  // Interrupts
+  input  logic [31:0] irq_i,         // level-sensitive request lines
+  output logic        irq_wake_o,    // an enabled line is asking (wakes WFI)
+  output logic        irq_pending_o, // ... and interrupts are globally enabled
+  output logic [ 4:0] irq_id_o,      // the line to take (see irq_priority)
+
   output logic [31:0] mtvec_o,
   output logic [31:0] mepc_o
 );
-  logic        mie_q, mpie_q;
+  logic        mstatus_mie_q, mstatus_mpie_q;
+  logic [31:0] mie_q;                // per-line enables (only IRQ_MASK bits exist)
   logic [31:0] mtvec_q, mscratch_q, mepc_q, mcause_q, mtval_q;
   logic [63:0] mcycle_q, minstret_q;
+
+  // ---- interrupt requests ------------------------------------------------------
+  logic [31:0] mip, enabled;
+  assign mip           = irq_i & IRQ_MASK;
+  assign enabled       = mip & mie_q;
+  assign irq_wake_o    = |enabled;
+  assign irq_pending_o = irq_wake_o && mstatus_mie_q;
+  assign irq_id_o      = irq_priority(enabled);
 
   // ---- read side ------------------------------------------------------------
   logic known;
@@ -50,8 +78,10 @@ module rabbit_csr
     known       = 1'b1;
     csr_rdata_o = 32'b0;
     unique case (csr_addr_i)
-      CSR_MSTATUS  : csr_rdata_o = {19'b0, 2'b11, 3'b0, mpie_q, 3'b0, mie_q, 3'b0};
+      CSR_MSTATUS  : csr_rdata_o = {19'b0, 2'b11, 3'b0, mstatus_mpie_q, 3'b0, mstatus_mie_q, 3'b0};
       CSR_MISA     : csr_rdata_o = MISA_VALUE;
+      CSR_MIE      : csr_rdata_o = mie_q;
+      CSR_MIP      : csr_rdata_o = mip;
       CSR_MTVEC    : csr_rdata_o = mtvec_q;
       CSR_MSCRATCH : csr_rdata_o = mscratch_q;
       CSR_MEPC     : csr_rdata_o = mepc_q;
@@ -87,9 +117,10 @@ module rabbit_csr
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      mie_q      <= 1'b0;
-      mpie_q     <= 1'b0;
-      mtvec_q    <= {MTVEC_RESET[31:2], 2'b00};
+      mstatus_mie_q  <= 1'b0;        // interrupts start disabled
+      mstatus_mpie_q <= 1'b0;
+      mie_q      <= '0;
+      mtvec_q    <= {MTVEC_RESET[31:2], 2'b01};   // vectored, like CV32E40P
       mscratch_q <= '0;
       mepc_q     <= '0;
       mcause_q   <= '0;
@@ -105,15 +136,16 @@ module rabbit_csr
         mepc_q   <= trap_pc_i;
         mcause_q <= trap_cause_i;
         mtval_q  <= trap_tval_i;
-        mpie_q   <= mie_q;
-        mie_q    <= 1'b0;
+        mstatus_mpie_q <= mstatus_mie_q;   // remember, then block nesting
+        mstatus_mie_q  <= 1'b0;
       end else if (mret_i) begin
-        mie_q    <= mpie_q;
-        mpie_q   <= 1'b1;
+        mstatus_mie_q  <= mstatus_mpie_q;
+        mstatus_mpie_q <= 1'b1;
       end else if (we) begin
         unique case (csr_addr_i)
-          CSR_MSTATUS  : begin mie_q <= wdata[3]; mpie_q <= wdata[7]; end
-          CSR_MTVEC    : mtvec_q    <= {wdata[31:2], 2'b00};   // direct mode only
+          CSR_MSTATUS  : begin mstatus_mie_q <= wdata[3]; mstatus_mpie_q <= wdata[7]; end
+          CSR_MIE      : mie_q      <= wdata & IRQ_MASK;
+          CSR_MTVEC    : mtvec_q    <= {wdata[31:2], 1'b0, wdata[0]};  // mode 0 or 1
           CSR_MSCRATCH : mscratch_q <= wdata;
           CSR_MEPC     : mepc_q     <= {wdata[31:2], 2'b00};   // IALIGN = 32
           CSR_MCAUSE   : mcause_q   <= wdata;
@@ -122,7 +154,7 @@ module rabbit_csr
           CSR_MCYCLEH  : mcycle_q[63:32]   <= wdata;
           CSR_MINSTRET : minstret_q[31:0]  <= wdata;
           CSR_MINSTRETH: minstret_q[63:32] <= wdata;
-          default      : ;   // misa, mhartid: writes ignored / read-only
+          default      : ;   // misa, mip, mhartid: writes ignored
         endcase
       end
     end

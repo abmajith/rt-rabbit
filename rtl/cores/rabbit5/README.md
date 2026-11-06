@@ -19,10 +19,12 @@ IF ──► ID ──► EX ──► MEM ──► WB
 |---|---|---|
 | `hello` firmware in the SoC | PASS, 3958 cycles (rabbit3: 3145, CV32E40P: 3450 with HW mul/div) | `make soc-sim CORE=rabbit5` |
 | riscv-formal (37 instructions + reg, pc_fwd, pc_bwd, causal, unique, liveness, ill, cover) | **45/45 PASS** | `make formal CORE=rabbit5` |
-| Timing properties T1–T3 (ours, beyond riscv-formal) | PASS (BMC depth 24) + all covers reached | `make formal CORE=rabbit5` |
-| Gate-level smoke test (Yosys generic gates) | PASS, **same 3958 cycles** as RTL | `make gls-smoke CORE=rabbit5` |
+| Timing properties T1–T4 (ours, beyond riscv-formal) | PASS (BMC depth 24) + all covers reached | `make formal CORE=rabbit5` |
+| Interrupts + WFI: properties I1–I4, W0–W2; latency ≤ **7 cycles** (tight) | PASS + all covers reached | `make formal CORE=rabbit5` |
+| Interrupt self-test firmware (same as on CV32E40P / rabbit3) | PASS, 9025 cycles | `make soc-sim CORE=rabbit5 PROG=irq` |
+| Gate-level smoke test (Yosys generic gates) | PASS, **same cycles** as RTL (hello 3958, irq 9025) | `make gls-smoke CORE=rabbit5` |
 | Verilator `-Wall` lint | clean | `make lint CORE=rabbit5` |
-| Size (Yosys generic synthesis, core + adapter) | ≈ 11.1 k cells | `make gls-netlist CORE=rabbit5` |
+| Size (Yosys generic synthesis, core + adapter) | ≈ 11.5 k cells | `make gls-netlist CORE=rabbit5` |
 
 > Correction (2026-11-06): the first version of the timing testbench declared
 > its free inputs with `(* anyseq *)`, which the slang frontend silently
@@ -43,13 +45,20 @@ Then:
 | 3 | `../../../dv/formal/rabbit/timing/rabbit_timing_tb.sv` | ~170 | the timing properties T1–T3 (same file for every core) |
 | 4 | `../../../dv/formal/rabbit/wrapper.sv`, `checks.cfg` | | how riscv-formal sees the core |
 
-## The timing model (rules R1–R5, in `rabbit5_core.sv`)
+## The timing model (rules R1–R7, in `rabbit5_core.sv`)
 
 1. **R1** one instruction retires per cycle, except:
 2. **R2** load-use: 1 bubble if an instruction reads the register loaded by the instruction just before it;
 3. **R3** every redirect (taken branch, JAL, JALR, MRET, trap) is decided in EX: exactly 2 bubbles, no prediction;
 4. **R4** memory grants immediately and answers after exactly 1 cycle (scratchpad assumption);
-5. **R5** nothing else stalls.
+5. **R5** nothing else stalls, except WFI sleep;
+6. **R6** an interrupt is taken in EX on the instruction there (it does not retire; MRET runs it later): latency ≤ 7 cycles;
+7. **R7** WFI = redirect to pc+4, then sleep until an enabled interrupt is pending (`core_sleep_o`).
+
+Interrupt latency, counted from the cycle an enabled interrupt becomes pending
+to the retirement of the handler's first instruction: 5 cycles if EX holds an
+instruction, up to 7 if EX holds a redirect bubble or the core was asleep
+(rabbit3: 3 / 4).
 
 **Consequence (proven as T1):** the time between two consecutive retirements is
 1, 2 or 3 cycles and depends only on those two instructions. For a straight-line
@@ -75,7 +84,7 @@ Things to verify yourself (good first exercises):
 
 | Limitation | Planned |
 |---|---|
-| No interrupts (`irq_i` ignored), no debug module | M2: timer + external IRQ with a **bounded, proven** entry latency |
+| No debug module | later |
 | Memory must be zero-wait (R4); no back-pressure | M4: TDM scratchpad arbiter → stall only in MEM (Patmos rule) |
 | CSRs are not formally checked (riscv-formal `csrw`/`csrc_*` checks not enabled yet) | M2 |
 | BMC proves properties up to a depth (24 cycles timing, 12–20 riscv-formal), not unbounded | try `mode prove` (k-induction) once stable |
@@ -85,6 +94,6 @@ Things to verify yourself (good first exercises):
 ## Ideas for your own properties (robotics / real time)
 
 - **Loop timing:** for a given loop body, cycles per iteration is constant — express as "the gap pattern between retirements of a repeated PC sequence is periodic".
-- **Interrupt latency (after M2):** from `irq_i` rising to the first handler instruction retiring ≤ K cycles, for all program states.
+- **Interrupt latency** is done (I1). Next step: a bound on the *whole* handler entry including the C prologue, or "two interrupts in a row: the second is never starved".
 - **Memory slot predictability (T3 extended):** the data bus is used *only* in the cycle before retirement — the property the TDM arbiter of the dual core will rely on.
 - **Dual core (M4):** core 0's T1 gaps are unchanged whatever core 1 executes.

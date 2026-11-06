@@ -9,3 +9,9 @@ CORE_VERILATOR_FLAGS :=
 TIMING_FIRST_RETIRE := 5
 TIMING_REDIRECT_GAP := 3
 TIMING_LOADUSE_GAP  := 2
+# Worst-case cycles from "an enabled interrupt is pending" to the retirement
+# of the first handler instruction (rule R6). 0 = no interrupts.
+TIMING_IRQ_LATENCY  := 7
+# Cycles from the commit stage (EX) to retirement (WB). The timing testbench
+# uses it to line up its RVFI-based spec model with the core.
+TIMING_COMMIT_TO_RETIRE := 2

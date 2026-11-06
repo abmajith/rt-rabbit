@@ -1,7 +1,7 @@
 // =============================================================================
 // rabbit_decoder — instruction bits -> decoded_t   (pure combinational)
 // =============================================================================
-// Supported: all of RV32I, plus FENCE and WFI (both executed as no-ops),
+// Supported: all of RV32I, plus FENCE (a no-op) and WFI,
 // ECALL, EBREAK, MRET and the six Zicsr instructions.
 // Anything else sets `illegal`; the EX stage turns that into a trap.
 // =============================================================================
@@ -152,7 +152,7 @@ module rabbit_decoder
             12'h000: dec_o.is_ecall  = 1'b1;
             12'h001: dec_o.is_ebreak = 1'b1;
             12'h302: dec_o.is_mret   = 1'b1;
-            12'h105: ;                          // WFI: no-op (no interrupts in v0)
+            12'h105: dec_o.is_wfi    = 1'b1;    // sleep until an enabled interrupt is pending
             default: dec_o.illegal   = 1'b1;
           endcase
           if (rd != 5'd0 || rs1 != 5'd0) dec_o.illegal = 1'b1;
@@ -192,6 +192,7 @@ module rabbit_decoder
       dec_o.is_ecall  = 1'b0;
       dec_o.is_ebreak = 1'b0;
       dec_o.is_mret   = 1'b0;
+      dec_o.is_wfi    = 1'b0;
     end
   end
 
