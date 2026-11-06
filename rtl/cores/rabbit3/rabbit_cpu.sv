@@ -1,4 +1,4 @@
-// rabbit_cpu adapter for rabbit3 (our own 3-stage RV32I core).
+// rabbit_cpu adapter for rabbit3 (our own 3-stage RV32IM core).
 // See rtl/cores/README.md for the port contract. rabbit5 needs memories that
 // grant immediately and answer one cycle later (rabbit3_core.sv, rule R4).
 module rabbit_cpu #(

@@ -39,3 +39,7 @@ build/
 dv/formal/rabbit/build/
 dv/formal/rabbit/*.log
 dv/formal/rabbit/timing/timing*/
+
+# SymbiYosys work directories of the muldiv unit proof
+dv/formal/rabbit/muldiv/muldiv/
+dv/formal/rabbit/muldiv/muldiv_*/

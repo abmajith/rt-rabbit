@@ -1,6 +1,6 @@
-# rabbit5 — our own timing-predictable RV32I core (v0)
+# rabbit5 — our own timing-predictable RV32IM core (v0)
 
-A classic 5-stage, single-issue, in-order RV32I pipeline written to be **read,
+A classic 5-stage, single-issue, in-order RV32IM pipeline written to be **read,
 reviewed and modified**, with one research goal: *every instruction's timing is
 known in advance and proven*. Plugs into the SoC through the same `rabbit_cpu`
 contract as CV32E40P, so both run the same firmware and tests.
@@ -17,14 +17,16 @@ IF ──► ID ──► EX ──► MEM ──► WB
 
 | What | Result | Command |
 |---|---|---|
-| `hello` firmware in the SoC | PASS, 3958 cycles (rabbit3: 3145, CV32E40P: 3450 with HW mul/div) | `make soc-sim CORE=rabbit5` |
-| riscv-formal (37 instructions + reg, pc_fwd, pc_bwd, causal, unique, liveness, ill, cover) | **45/45 PASS** | `make formal CORE=rabbit5` |
+| `hello` firmware in the SoC | PASS, 3471 cycles (RV32I: 3958; rabbit3: 2756, CV32E40P: 3450) | `make soc-sim CORE=rabbit5` |
+| riscv-formal (45 instructions incl. M with ALTOPS + reg, pc_fwd, pc_bwd, causal, unique, liveness, ill, cover) | **53/53 PASS** | `make formal CORE=rabbit5` |
+| M extension: multiply 2 cycles, divide 34, for any operands (R8, T1); unit proof of the arithmetic | PASS | `make formal CORE=rabbit5` |
+| M self-test firmware (corner cases, random, timing, interrupt during divide) | PASS (same test on CV32E40P / rabbit3) | `make soc-sim CORE=rabbit5 PROG=muldiv` |
 | Timing properties T1–T4 (ours, beyond riscv-formal) | PASS (BMC depth 24) + all covers reached | `make formal CORE=rabbit5` |
 | Interrupts + WFI: properties I1–I4, W0–W2; latency ≤ **7 cycles** (tight) | PASS + all covers reached | `make formal CORE=rabbit5` |
 | Interrupt self-test firmware (same as on CV32E40P / rabbit3) | PASS, 9025 cycles | `make soc-sim CORE=rabbit5 PROG=irq` |
-| Gate-level smoke test (Yosys generic gates) | PASS, **same cycles** as RTL (hello 3958, irq 9025) | `make gls-smoke CORE=rabbit5` |
+| Gate-level smoke test (Yosys generic gates) | PASS, **same cycles** as RTL (hello 3471, irq 9025, muldiv) | `make gls-smoke CORE=rabbit5` |
 | Verilator `-Wall` lint | clean | `make lint CORE=rabbit5` |
-| Size (Yosys generic synthesis, core + adapter) | ≈ 11.5 k cells | `make gls-netlist CORE=rabbit5` |
+| Size, sky130 (`synth -booth` + ABC, core + adapter) | 126.5 k µm² (RV32I: 95.4 k; CV32E40P: 170.3 k) | see `../rabbit_common/README.md` |
 
 > Correction (2026-11-06): the first version of the timing testbench declared
 > its free inputs with `(* anyseq *)`, which the slang frontend silently
@@ -53,7 +55,8 @@ Then:
 4. **R4** memory grants immediately and answers after exactly 1 cycle (scratchpad assumption);
 5. **R5** nothing else stalls, except WFI sleep;
 6. **R6** an interrupt is taken in EX on the instruction there (it does not retire; MRET runs it later): latency ≤ 7 cycles;
-7. **R7** WFI = redirect to pc+4, then sleep until an enabled interrupt is pending (`core_sleep_o`).
+7. **R7** WFI = redirect to pc+4, then sleep until an enabled interrupt is pending (`core_sleep_o`);
+8. **R8** MUL* stay 2 cycles in EX, DIV*/REM* 34, whatever the operands; IF/ID wait (no fetch), MEM/WB drain. An interrupt abandons the multiply/divide (it runs again after MRET), so the 7-cycle latency holds.
 
 Interrupt latency, counted from the cycle an enabled interrupt becomes pending
 to the retirement of the handler's first instruction: 5 cycles if EX holds an
@@ -61,7 +64,8 @@ instruction, up to 7 if EX holds a redirect bubble or the core was asleep
 (rabbit3: 3 / 4).
 
 **Consequence (proven as T1):** the time between two consecutive retirements is
-1, 2 or 3 cycles and depends only on those two instructions. For a straight-line
+1, 2 or 3 cycles (+1 / +33 for M instructions) and depends only on those two
+instructions. For a straight-line
 or loop path you can compute the cycle count by hand — that is what makes WCET
 analysis trivial for this core.
 
@@ -74,6 +78,7 @@ Design choices you may want to change:
 - [ ] **All pipeline registers have an asynchronous reset** — costs area, removes X in simulation/GLS.
 - [ ] **`minstret` counts at EX (commit point)**, so a CSR read sees all older instructions.
 - [ ] Misaligned loads/stores **trap** (cause 4/6) rather than being split into two accesses.
+- [ ] **M instructions wait in EX** (R8). While they wait, `ex_q` keeps the instruction but stores the *forwarded* operand values: the older instructions it forwarded from leave MEM/WB meanwhile, and the muldiv unit needs the same operands every cycle (proven: M0). Try removing those two lines and see which check fails.
 
 Things to verify yourself (good first exercises):
 - [ ] Draw the pipeline diagram for `lw x1,0(x2); add x3,x1,x1` and check it against a waveform (`make soc-waves CORE=rabbit5`).
@@ -88,7 +93,8 @@ Things to verify yourself (good first exercises):
 | Memory must be zero-wait (R4); no back-pressure | M4: TDM scratchpad arbiter → stall only in MEM (Patmos rule) |
 | CSRs are not formally checked (riscv-formal `csrw`/`csrc_*` checks not enabled yet) | M2 |
 | BMC proves properties up to a depth (24 cycles timing, 12–20 riscv-formal), not unbounded | try `mode prove` (k-induction) once stable |
-| No M/C extensions (software mul/div) | later; a single-cycle multiplier keeps R1 intact |
+| No C extension | not planned for the RT core (code size vs. fetch simplicity) |
+| An interrupt during a divide throws away up to 33 cycles of work | count it once per interrupt in WCET analysis |
 | Register file not reset (x1..x31 start as X in gate-level sim) | fine for software that initialises registers |
 
 ## Ideas for your own properties (robotics / real time)

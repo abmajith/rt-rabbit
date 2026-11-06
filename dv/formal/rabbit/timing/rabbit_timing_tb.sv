@@ -14,6 +14,10 @@
 //   LOADUSE_GAP    cycles between a load and an instruction using it    (2 / 1)
 //   IRQ_LATENCY    worst-case interrupt latency, 0 = no interrupts      (7 / 4)
 //   COMMIT_TO_RETIRE  cycles from the commit stage to retirement        (2 / 1)
+//   MUL_CYCLES     cycles a MUL* spends in the commit stage             (2 / 2)
+//   RABBIT_DIV_STEPS  divider steps in this proof; a DIV* spends
+//                  RABBIT_DIV_STEPS+2 cycles in the commit stage (see core.mk:
+//                  the proof uses 2 steps, the real 32 are proven in muldiv/)
 //
 //   T1  exact timing model: the gap between two consecutive retirements is
 //         REDIRECT_GAP  if the earlier instruction changed control flow
@@ -21,7 +25,10 @@
 //         LOADUSE_GAP   if the later one reads the register the
 //                       earlier one loaded (load-use)                [rule R2]
 //         1             otherwise                                    [rule R1]
+//       plus MUL_CYCLES-1 / DIV_CYCLES-1 if the later one is an M
+//       instruction, whatever its operands                           [rule R8]
 //   T2  the first instruction retires exactly FIRST_RETIRE cycles after reset
+//       (plus the M extra cycles if it is an M instruction)
 //   T3  a data-memory request happens exactly one cycle before the instruction
 //       that made it retires, and never at any other time            [rule R4]
 //   T4  after WFI sleep, the next instruction retires FIRST_RETIRE-1 cycles
@@ -30,7 +37,10 @@
 //
 // Interrupts (only if the core declares IRQ_LATENCY > 0):
 //   I1  bounded latency: an enabled interrupt that stays pending makes the
-//       first handler instruction retire within IRQ_LATENCY cycles
+//       first handler instruction retire within IRQ_LATENCY cycles (plus
+//       that instruction's own M extra cycles if it is a MUL/DIV: the
+//       interrupt is *taken* within the bound, whatever the core was doing,
+//       including in the middle of a divide)
 //   I2  no spurious interrupts: an interrupt is only taken if one was pending
 //       and enabled
 //   I3  precise: mepc, as read by the handler, is the pc of the instruction
@@ -40,6 +50,15 @@
 //       vector the core jumped to)
 //   I5  the handler starts at the right address: mtvec base (direct mode) or
 //       base + 4*line for a requested line (vectored mode)
+// M extension:
+//   M0  while an M instruction waits in the commit stage, its operand values
+//       do not change (rabbit_muldiv relies on it; white-box: looks inside
+//       rabbit_execute)
+//   M1  an interrupt that arrives while an M instruction waits is taken
+//       within the same IRQ_LATENCY bound (I1 covers it; cover below shows
+//       it happens)
+//   M2  while an M instruction waits, no instruction is fetched (power: a
+//       divide costs no instruction-memory reads)
 // Sleep (WFI), for power:
 //   W0  the core only falls asleep when a WFI retires
 //   W1  it wakes in the cycle after an enabled interrupt becomes pending
@@ -66,6 +85,8 @@ module rabbit_timing_tb (
   localparam int REDIRECT_GAP = `REDIRECT_GAP;
   localparam int LOADUSE_GAP  = `LOADUSE_GAP;
   localparam int IRQ_LATENCY  = `IRQ_LATENCY;
+  localparam int MUL_CYCLES   = `MUL_CYCLES;
+  localparam int DIV_CYCLES   = `RABBIT_DIV_STEPS + 2;
 `ifndef COMMIT_TO_RETIRE
 `define COMMIT_TO_RETIRE 1
 `endif
@@ -148,6 +169,12 @@ module rabbit_timing_tb (
                      || (opcode == 7'b1100011 && branch_taken);      // taken branch
   assign is_load = (opcode == 7'b0000011) && !rvfi_trap;
 
+  // M extension: extra cycles in the commit stage (rule R8)
+  logic is_m;
+  int   m_extra;
+  assign is_m    = (opcode == 7'b0110011) && (rvfi_insn[31:25] == 7'b0000001) && !rvfi_trap;
+  assign m_extra = !is_m ? 0 : funct3[2] ? DIV_CYCLES - 1 : MUL_CYCLES - 1;
+
   // CSR instructions (the ISA meaning: old value -> rd, then write)
   logic        is_csr, csr_writes;
   logic [11:0] csr_addr;
@@ -206,17 +233,17 @@ module rabbit_timing_tb (
                     (rvfi_rs1_addr == prev_rd || rvfi_rs2_addr == prev_rd);
 
   int expected_gap;
-  assign expected_gap = prev_flow ? REDIRECT_GAP : (load_use ? LOADUSE_GAP : 1);
+  assign expected_gap = (prev_flow ? REDIRECT_GAP : (load_use ? LOADUSE_GAP : 1)) + m_extra;
 
   // ---- T1, T2, T4 --------------------------------------------------------------------
   // An interrupt removes an instruction from the pipeline; its timing is I1.
   always_comb begin
     if (rst_n && rvfi_valid && !rvfi_intr) begin
-      if (!seen_one)  assert (cycle == FIRST_RETIRE - 1);        // T2 (cycle counts from 0)
-      else if (slept) assert (since_sleep + 1 + D == FIRST_RETIRE - 1); // T4
+      if (!seen_one)  assert (cycle == FIRST_RETIRE - 1 + m_extra);   // T2 (cycle counts from 0)
+      else if (slept) assert (since_sleep + 1 + D == FIRST_RETIRE - 1 + m_extra); // T4
       else            assert (gap == expected_gap);              // T1
     end
-    if (rst_n && !seen_one) assert (cycle < FIRST_RETIRE); // T2: nothing is late
+    if (rst_n && !seen_one) assert (cycle < FIRST_RETIRE + DIV_CYCLES - 1); // T2: nothing is late
   end
 
   // ---- T3: memory is used exactly one cycle before retirement ---------------------------
@@ -225,6 +252,20 @@ module rabbit_timing_tb (
 
   always_comb begin
     if (rst_n) assert (data_req_q == (rvfi_valid && (rvfi_mem_rmask != 0 || rvfi_mem_wmask != 0)));
+  end
+
+  // ---- M0: operands stay put while an M instruction waits ------------------------------
+  logic        ex_busy_q = 1'b0;
+  logic [31:0] ex_rs1_q, ex_rs2_q;
+  always_ff @(posedge clk) begin
+    ex_busy_q <= rst_n && dut.u_execute.busy_o;
+    ex_rs1_q  <= dut.u_execute.rs1_i;
+    ex_rs2_q  <= dut.u_execute.rs2_i;
+  end
+  always_comb begin
+    if (rst_n && ex_busy_q && dut.u_execute.valid_i)
+      assert (dut.u_execute.rs1_i == ex_rs1_q && dut.u_execute.rs2_i == ex_rs2_q);   // M0
+    if (rst_n && dut.u_execute.busy_o) assert (!instr_req);                       // M2
   end
 
   // ---- interrupt-enable state: a spec model computed from RVFI only -------------------
@@ -304,8 +345,20 @@ module rabbit_timing_tb (
       end
     end
     always_comb begin
-      if (rst_n) assert (wait_cycles + D <= IRQ_LATENCY);                 // I1
+      // I1: the handler's first instruction retires within IRQ_LATENCY, plus
+      // its own M extra cycles if it is itself a MUL/DIV (it cannot be
+      // interrupted: MIE = 0 in the handler). The second line bounds the
+      // wait in every cycle, so an interrupt can never be ignored.
+      if (rst_n && rvfi_valid && rvfi_intr) assert (wait_cycles + D <= IRQ_LATENCY + m_extra);
+      if (rst_n) assert (wait_cycles + D <= IRQ_LATENCY + DIV_CYCLES - 1);
       if (rst_n && rvfi_valid && rvfi_intr) assert (requested);            // I2
+    end
+
+    // M1 (cover): an M instruction was waiting when the interrupt was taken
+    logic m_busy_seen;
+    always_ff @(posedge clk) begin
+      if (!rst_n || (rvfi_valid && rvfi_intr)) m_busy_seen <= 1'b0;
+      else if (ex_busy_q && dut.u_execute.irq_take) m_busy_seen <= 1'b1;   // was waiting, now interrupted
     end
 
     // ---- I5: where the handler starts --------------------------------------------------
@@ -365,9 +418,10 @@ module rabbit_timing_tb (
     // ---- non-vacuity ---------------------------------------------------------------------
     always_comb begin
       if (rst_n && rvfi_valid && rvfi_intr) begin
-        cover (wait_cycles + D == IRQ_LATENCY);   // the bound is reached (it is tight)
+        cover (wait_cycles + D == IRQ_LATENCY && m_extra == 0);   // the bound is tight
         cover (wait_cycles + D == IRQ_LATENCY - 1);
         cover (slept);                            // WFI woken by the interrupt it takes
+        cover (m_busy_seen);                      // M1: interrupt while an M op waited
         cover (!m_tvec[0]);                       // direct mode is exercised too
         cover (m_tvec[0] && vec_line != 7);       // ... and a vector other than the timer's
       end
@@ -382,7 +436,8 @@ module rabbit_timing_tb (
   // ---- throughput bounds ------------------------------------------------------------------
   // From T1 + T2: after the first retirement (cycle FIRST_RETIRE-1), one more
   // instruction retires every 1..REDIRECT_GAP cycles. So at cycle 19 between
-  // MIN_AT_19 and MAX_AT_19 have retired (rabbit5: 6..16, rabbit3: 9..18).
+  // MIN_AT_19 and MAX_AT_19 have retired (rabbit5: 6..16, rabbit3: 9..18),
+  // not counting M extra cycles and sleep.
   // Both extremes must be reachable (covers below).
   localparam int MAX_AT_19 = 19 - (FIRST_RETIRE - 1) + 1;
   localparam int MIN_AT_19 = (19 - (FIRST_RETIRE - 1)) / REDIRECT_GAP + 1;
@@ -405,6 +460,9 @@ module rabbit_timing_tb (
       cover (gap == LOADUSE_GAP && load_use);
       cover (gap == REDIRECT_GAP);
       cover (gap == REDIRECT_GAP && rvfi_trap);
+      cover (is_m && !funct3[2] && gap == MUL_CYCLES);       // R8: multiply
+      cover (is_m &&  funct3[2] && gap == DIV_CYCLES);       // R8: divide
+      cover (is_m && load_use);                              // R8 after load-use
     end
   end
 endmodule

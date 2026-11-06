@@ -72,7 +72,9 @@ formal:
 GLS_DIR := build/gls/$(CORE)
 YOSYS_SLANG := $(shell yosys -p 'help read_slang' >/dev/null 2>&1 || echo -m slang)
 gls-netlist: $(GLS_DIR)/rabbit_cpu_netlist.v
-$(GLS_DIR)/rabbit_cpu_netlist.v: $(wildcard rtl/cores/$(CORE)/*.sv)
+# every file in the core's files.f (incl. rabbit_common), not just rtl/cores/$(CORE)/
+GLS_SOURCES := $(shell grep -v '^//' rtl/cores/$(CORE)/files.f | sed 's|$${REPO}|$(REPO)|')
+$(GLS_DIR)/rabbit_cpu_netlist.v: $(GLS_SOURCES) rtl/cores/$(CORE)/files.f
 	@mkdir -p $(GLS_DIR)
 	yosys $(YOSYS_SLANG) -q -l $(GLS_DIR)/synth.log -p "read_slang \
 	    $$(grep -v '^//' rtl/cores/$(CORE)/files.f | sed 's|$${REPO}|$(REPO)|' | tr '\n' ' ') \

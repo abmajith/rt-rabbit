@@ -5,7 +5,7 @@ FPGA → open-source ASIC, evaluated with Zephyr and real-time Linux, with a
 vector / quantized-NN block. Five-year plan and research notes are kept
 outside the repository.
 
-CPUs: **rabbit5**, our own timing-predictable 5-stage RV32I core
+CPUs: **rabbit3** / **rabbit5**, our own timing-predictable 3- and 5-stage RV32IM cores
 ([`rtl/cores/rabbit5/README.md`](rtl/cores/rabbit5/README.md)), and **OpenHW
 CV32E40P** (RV32IMC) as reference. Every layer above the CPU talks to a
 core-agnostic `rabbit_cpu` contract, so cores plug in the same way:

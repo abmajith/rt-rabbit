@@ -23,6 +23,9 @@ package rabbit_pkg;
   localparam logic [6:0] OPC_JAL      = 7'b110_1111;
   localparam logic [6:0] OPC_SYSTEM   = 7'b111_0011;  // ECALL, EBREAK, MRET, WFI, CSR*
 
+  // funct7 of OPC_OP that selects the M extension (MUL..REMU)
+  localparam logic [6:0] FUNCT7_MULDIV = 7'b000_0001;
+
   // ---------------------------------------------------------------------------
   // ALU operations
   // ---------------------------------------------------------------------------
@@ -72,6 +75,7 @@ package rabbit_pkg;
     logic        is_ebreak;
     logic        is_mret;
     logic        is_wfi;
+    logic        is_muldiv;   // M extension: MUL* / DIV* / REM* (funct3 says which)
   } decoded_t;
 
   // ---------------------------------------------------------------------------
@@ -92,8 +96,8 @@ package rabbit_pkg;
   localparam logic [11:0] CSR_MINSTRETH= 12'hB82;
   localparam logic [11:0] CSR_MHARTID  = 12'hF14;
 
-  // misa: MXL=1 (32-bit), extension I only
-  localparam logic [31:0] MISA_VALUE = 32'h4000_0100;
+  // misa: MXL=1 (32-bit), extensions I and M
+  localparam logic [31:0] MISA_VALUE = 32'h4000_1100;
 
   // ---------------------------------------------------------------------------
   // Interrupts. Line i of irq_i is bit i of mip and mie (RISC-V standard

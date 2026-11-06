@@ -10,7 +10,7 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, RisingEdge
 
-MAX_CYCLES = int(os.environ.get("RABBIT_MAX_CYCLES", "200000"))
+MAX_CYCLES = int(os.environ.get("RABBIT_MAX_CYCLES", "1000000"))
 
 
 async def run_firmware(dut, max_cycles: int = MAX_CYCLES):

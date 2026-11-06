@@ -1,5 +1,5 @@
 // =============================================================================
-// rabbit3_core — 3-stage in-order RV32I pipeline (single hart)
+// rabbit3_core — 3-stage in-order RV32IM pipeline (single hart)
 // =============================================================================
 // START HERE to learn the rabbit pipelines; then read rabbit5_core.sv.
 //
@@ -32,7 +32,8 @@
 //       and costs exactly 1 cycle (1 bubble).
 //   R4  Memory must answer in exactly 1 cycle (grant in the request cycle,
 //       data the next cycle).
-//   R5  Nothing else ever stalls the pipeline, except WFI sleep (R7).
+//   R5  Nothing else ever stalls the pipeline, except WFI sleep (R7) and
+//       the M extension (R8).
 //   R6  Interrupts are taken in X, on the instruction there, which does not
 //       retire (it runs again after MRET). The handler's first instruction
 //       retires at most TIMING_IRQ_LATENCY cycles after an enabled interrupt
@@ -40,9 +41,15 @@
 //   R7  WFI is a redirect to pc+4 (R3). If no enabled interrupt is pending,
 //       fetch stops (core_sleep_o = 1) until one is; it restarts in the same
 //       cycle the interrupt appears.
+//   R8  MUL/MULH/MULHSU/MULHU stay 2 cycles in X, DIV/DIVU/REM/REMU 34,
+//       whatever the operands: they retire 1 or 33 cycles later than
+//       another instruction would. Fetch stops meanwhile (no wasted memory
+//       reads). An interrupt is still taken at once (R6): the multiply or
+//       divide is abandoned and runs again after MRET.
 //
-// So the time between two consecutive retirements is 1 or 2 cycles, plus the
-// cycles spent asleep, except around an interrupt (R6).
+// So the time between two consecutive retirements is 1 or 2 cycles, plus 1
+// or 33 for M instructions (R8), plus the cycles spent asleep, except around
+// an interrupt (R6).
 // -----------------------------------------------------------------------------
 //
 // What an instruction does lives in rtl/cores/rabbit_common/ (shared with
@@ -117,8 +124,9 @@ module rabbit3_core
   logic        x_sleep;        // the instruction in X is a WFI that goes to sleep
   logic        wake;           // an enabled interrupt is pending
   logic        fetch;          // a fetch happens this cycle
+  logic        x_busy;         // X holds an unfinished multiply/divide (R8)
 
-  assign fetch        = fetch_enable_i && (!sleep_q || wake);
+  assign fetch        = fetch_enable_i && (!sleep_q || wake) && !x_busy;
   assign instr_req_o  = fetch;
   assign instr_addr_o = pc_q;
   assign core_sleep_o = sleep_q;
@@ -141,24 +149,40 @@ module rabbit3_core
   // ===========================================================================
   logic        x_valid_q;      // the word arriving now is a real instruction
   logic [31:0] x_pc_q;         // ... fetched from this address
+  // While X is held (R8) no new word arrives, so the instruction is kept in
+  // a small holding register (32 flip-flops; same idea as rabbit5's ID).
+  logic        x_hold_q;
+  logic [31:0] x_hold_instr_q;
+  logic [31:0] x_instr;
+
+  assign x_instr = x_hold_q ? x_hold_instr_q : instr_rdata_i;
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      x_valid_q <= 1'b0;
-      x_pc_q    <= '0;
+      x_valid_q      <= 1'b0;
+      x_pc_q         <= '0;
+      x_hold_q       <= 1'b0;
+      x_hold_instr_q <= '0;
     end else if (redirect) begin            // the word in flight is wrong-path
-      x_valid_q <= 1'b0;
+      x_valid_q      <= 1'b0;
+      x_hold_q       <= 1'b0;
+    end else if (x_busy) begin              // keep the same instruction (R8)
+      x_hold_q       <= 1'b1;
+      x_hold_instr_q <= x_instr;
     end else begin
-      x_valid_q <= fetch;
-      x_pc_q    <= pc_q;
+      x_valid_q      <= fetch;
+      x_pc_q         <= pc_q;
+      x_hold_q       <= 1'b0;
     end
   end
 
   decoded_t x_dec;
-  rabbit_decoder u_decoder (.instr_i(instr_rdata_i), .dec_o(x_dec));
+  rabbit_decoder u_decoder (.instr_i(x_instr), .dec_o(x_dec));
 
   // Register file: read in X, written in W. The write-first bypass inside
-  // is this core's entire forwarding network.
+  // is this core's entire forwarding network. While X is held (R8), the
+  // older instruction in W writes its result in the first cycle (bypass) and
+  // W then holds bubbles, so the operand values read here stay the same.
   logic [31:0] x_rs1_val, x_rs2_val;
   rabbit_regfile u_regfile (
     .clk_i,
@@ -172,13 +196,14 @@ module rabbit3_core
     .clk_i, .rst_ni,
     .valid_i      (x_valid_q),
     .pc_i         (x_pc_q),
-    .instr_i      (instr_rdata_i),
+    .instr_i      (x_instr),
     .dec_i        (x_dec),
     .rs1_i        (x_rs1_val),
     .rs2_i        (x_rs2_val),
     .res_o        (x_res),
     .redirect_o   (redirect),
     .redirect_pc_o(redirect_pc),
+    .busy_o       (x_busy),
     .irq_i,
     .sleep_o      (x_sleep),
     .wake_o       (wake)

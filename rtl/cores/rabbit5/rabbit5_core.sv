@@ -1,5 +1,5 @@
 // =============================================================================
-// rabbit5_core — 5-stage in-order RV32I pipeline (single hart)
+// rabbit5_core — 5-stage in-order RV32IM pipeline (single hart)
 // =============================================================================
 //
 //   cycle:   1    2    3    4    5    6
@@ -25,7 +25,8 @@
 //   R4  Memory must answer in exactly 1 cycle (grant in the request cycle,
 //       data the next cycle). This is the scratchpad-memory assumption from
 //       FlexPRET/Patmos; the core never waits on memory.
-//   R5  Nothing else ever stalls the pipeline, except WFI sleep (R7).
+//   R5  Nothing else ever stalls the pipeline, except WFI sleep (R7) and
+//       the M extension (R8).
 //   R6  Interrupts are taken in EX, on the instruction there, which does not
 //       retire (it runs again after MRET); IF and ID are flushed as for any
 //       redirect, MEM and WB are older and finish. The handler's first
@@ -34,10 +35,16 @@
 //   R7  WFI is a redirect to pc+4 (R3). If no enabled interrupt is pending,
 //       fetch stops (core_sleep_o = 1) until one is; it restarts in the same
 //       cycle the interrupt appears.
+//   R8  MUL/MULH/MULHSU/MULHU stay 2 cycles in EX, DIV/DIVU/REM/REMU 34,
+//       whatever the operands: they retire 1 or 33 cycles later than
+//       another instruction would. IF and ID wait (no fetch meanwhile); MEM
+//       and WB drain. An interrupt is still taken at once (R6): the
+//       multiply or divide is abandoned and runs again after MRET.
 //
 // So the time between two consecutive retirements is 1, 2 (R2) or 3 (R3)
-// cycles and depends only on those two instructions, plus the cycles spent
-// asleep, except around an interrupt (R6).
+// cycles, plus 1 or 33 for M instructions (R8), and depends only on those
+// two instructions, plus the cycles spent asleep, except around an
+// interrupt (R6).
 //
 // Interrupts and WFI are the same as in rabbit3 (see rabbit3/README.md); only
 // the stage that takes them differs (EX here, X there).
@@ -128,6 +135,8 @@ module rabbit5_core
   logic        redirect;       // EX changes control flow this cycle
   logic [31:0] redirect_pc;
   logic        stall;          // ID must wait one cycle (load-use)
+  logic        ex_busy;        // EX holds an unfinished multiply/divide (R8)
+  logic        id_hold;        // the instruction in ID stays there
   logic [31:0] wb_result;      // final register value of the instruction in WB
 
   // ===========================================================================
@@ -141,7 +150,7 @@ module rabbit5_core
   logic        wake;           // an enabled interrupt is pending
   logic        fetch;          // a fetch happens this cycle
 
-  assign fetch        = fetch_enable_i && (!sleep_q || wake);
+  assign fetch        = fetch_enable_i && (!sleep_q || wake) && !ex_busy;
   assign instr_req_o  = fetch;
   assign instr_addr_o = pc_q;
   assign core_sleep_o = sleep_q;
@@ -149,7 +158,7 @@ module rabbit5_core
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni)       pc_q <= BOOT_ADDR;
     else if (redirect) pc_q <= redirect_pc;   // R3
-    else if (stall)    pc_q <= pc_q;          // R2: ask for the same word again
+    else if (id_hold)  pc_q <= pc_q;          // R2: ask for the same word again (R8: no fetch)
     else if (fetch)    pc_q <= pc_q + 32'd4;
   end
 
@@ -163,8 +172,9 @@ module rabbit5_core
   // ===========================================================================
   // ID — decode and register read
   // ===========================================================================
-  // While ID is stalled, the memory is already returning the *next* word, so
-  // the stalled instruction is kept in a small holding register.
+  // While ID waits (load-use stall, or EX busy with R8), the memory returns
+  // another word or none at all, so the waiting instruction is kept in a
+  // small holding register.
   logic        id_valid_q;
   logic [31:0] id_pc_q;
   logic        id_hold_q;
@@ -182,7 +192,7 @@ module rabbit5_core
     end else if (redirect) begin            // wrong-path instruction: drop it
       id_valid_q      <= 1'b0;
       id_hold_q       <= 1'b0;
-    end else if (stall) begin               // keep the same instruction
+    end else if (id_hold) begin             // keep the same instruction
       id_hold_q       <= 1'b1;
       id_hold_instr_q <= id_instr;
     end else begin                          // take the word requested this cycle
@@ -210,12 +220,20 @@ module rabbit5_core
   assign load_use = id_valid_q && ex_q.valid && ex_q.dec.is_load && ex_q.dec.writes_rd &&
                     ((id_dec.uses_rs1 && id_dec.rs1 == ex_q.dec.rd) ||
                      (id_dec.uses_rs2 && id_dec.rs2 == ex_q.dec.rd));
-  assign stall = load_use && !redirect;   // a redirect throws the ID instruction away anyway
+  assign stall   = load_use && !redirect;   // a redirect throws the ID instruction away anyway
+  assign id_hold = stall || ex_busy;
 
+  // While EX is busy (R8) it keeps its instruction, but takes the operand
+  // values it is using now: the older instructions it forwards from leave
+  // MEM and WB meanwhile, and the operands must not change (rabbit_execute).
+  logic [31:0] ex_rs1, ex_rs2;               // operands after forwarding
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni)                  ex_q       <= '0;
     else if (redirect || stall)   ex_q.valid <= 1'b0;   // insert a bubble
-    else begin
+    else if (ex_busy) begin
+      ex_q.rs1_val <= ex_rs1;
+      ex_q.rs2_val <= ex_rs2;
+    end else begin
       ex_q.valid   <= id_valid_q;
       ex_q.pc      <= id_pc_q;
       ex_q.instr   <= id_instr;
@@ -238,6 +256,9 @@ module rabbit5_core
     else                                                                         return id_val;
   endfunction
 
+  assign ex_rs1 = forward(ex_q.dec.rs1, ex_q.rs1_val);
+  assign ex_rs2 = forward(ex_q.dec.rs2, ex_q.rs2_val);
+
   exec_t ex_res;
   rabbit_execute #(.MTVEC_RESET(MTVEC_ADDR), .HART_ID(HART_ID)) u_execute (
     .clk_i, .rst_ni,
@@ -245,11 +266,12 @@ module rabbit5_core
     .pc_i         (ex_q.pc),
     .instr_i      (ex_q.instr),
     .dec_i        (ex_q.dec),
-    .rs1_i        (forward(ex_q.dec.rs1, ex_q.rs1_val)),
-    .rs2_i        (forward(ex_q.dec.rs2, ex_q.rs2_val)),
+    .rs1_i        (ex_rs1),
+    .rs2_i        (ex_rs2),
     .res_o        (ex_res),
     .redirect_o   (redirect),
     .redirect_pc_o(redirect_pc),
+    .busy_o       (ex_busy),
     .irq_i,
     .sleep_o      (ex_sleep),
     .wake_o       (wake)
