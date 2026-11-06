@@ -27,10 +27,17 @@ module rabbit_soc_sim #(
   logic [ 3:0] data_be;
   logic [31:0] data_addr, data_wdata, data_rdata;
 
+  // A gate-level netlist has its parameters baked in at synthesis time
+  // (the rabbit_cpu defaults: BOOT_ADDR = 0x80, MTVEC_ADDR = 0x0), so it
+  // cannot be re-parameterised here.
+`ifdef RABBIT_GLS
+  rabbit_cpu u_cpu (
+`else
   rabbit_cpu #(
       .BOOT_ADDR (32'h0000_0080),
       .MTVEC_ADDR(32'h0000_0000)
   ) u_cpu (
+`endif
       .clk_i, .rst_ni,
       .fetch_enable_i(1'b1),
       .instr_req_o(instr_req), .instr_gnt_i(instr_gnt), .instr_rvalid_i(instr_rvalid),

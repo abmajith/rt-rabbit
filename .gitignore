@@ -35,3 +35,7 @@ assets/**
 sw/baremetal/build/
 **/sim_build_*/
 **/*.fst
+build/
+dv/formal/rabbit5/build/
+dv/formal/rabbit5/timing/timing_*/
+dv/formal/rabbit5/timing/timing/

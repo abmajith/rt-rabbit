@@ -4,4 +4,4 @@
   learn LibreLane end to end.
 - Y4: full MCU SoC on an IHP or sky130 (ChipFoundry) shuttle.
 - Keep RTL PDK-portable (no vendor macros in core logic; SRAMs behind a wrapper).
-Shuttle landscape as of 2026: see `docs/research/2026-11-04-soc-5yr-plan.md` §1.6.
+Shuttle landscape as of 2026 (Efabless closed; Tiny Tapeout on IHP; sky130 via ChipFoundry): see the research notes kept outside the repo.

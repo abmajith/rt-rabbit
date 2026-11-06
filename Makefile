@@ -5,6 +5,8 @@
 #   make ip-test        run every hw_ip cocotb unit/integration test
 #   make lint           Verilator lint of the SoC
 #   make rma-smoke      run all rma_analysis example configs
+#   make formal         riscv-formal + timing properties (CORE=rabbit5 only)
+#   make gls-smoke      synthesize the core with Yosys, run firmware on the netlist
 #   make ci             everything CI runs
 REPO := $(abspath .)
 export REPO
@@ -20,7 +22,7 @@ IP_TARGETS := pwm_unit qei_unit telemetry_rx telemetry_tx wb_telemetry rf_cdc \
 RMA_XFAIL := fifo_same_priority_interference.yaml
 
 help:
-	@sed -n '2,9p' Makefile | sed 's/^# //'
+	@sed -n '2,11p' Makefile | sed 's/^# //'
 
 sync:
 	uv sync
@@ -58,11 +60,34 @@ rma-smoke: sync
 	  uv run rma_analysis $$f >/dev/null && echo "ok    $$f"; \
 	done
 
+# ---- formal (rabbit5) ---------------------------------------------------------
+formal:
+	$(MAKE) -C dv/formal/rabbit5
+
+# ---- gate-level smoke test: generic Yosys gates, zero delay ----------------------
+# Catches RTL that simulates differently from what synthesizes (latches, X,
+# initial values, simulation-only constructs) long before a real PDK flow.
+GLS_DIR := build/gls/$(CORE)
+YOSYS_SLANG := $(shell yosys -p 'help read_slang' >/dev/null 2>&1 || echo -m slang)
+gls-netlist: $(GLS_DIR)/rabbit_cpu_netlist.v
+$(GLS_DIR)/rabbit_cpu_netlist.v: $(wildcard rtl/cores/$(CORE)/*.sv)
+	@mkdir -p $(GLS_DIR)
+	yosys $(YOSYS_SLANG) -q -l $(GLS_DIR)/synth.log -p "read_slang \
+	    $$(grep -v '^//' rtl/cores/$(CORE)/files.f | sed 's|$${REPO}|$(REPO)|' | tr '\n' ' ') \
+	    --top rabbit_cpu -DSYNTHESIS; \
+	  synth -top rabbit_cpu -flatten; tee -o $(GLS_DIR)/stat.txt stat; \
+	  write_verilog -noattr $@"
+	@grep -E '^ +[0-9]+ +cells' $(GLS_DIR)/stat.txt | head -1
+
+gls-smoke: sync gls-netlist
+	cd dv/cocotb/soc && uv run $(MAKE) CORE=$(CORE) PROG=$(PROG) GLS=1
+
 ci: lint soc-sim ip-test rma-smoke
 
 clean:
 	$(MAKE) -C sw/baremetal clean
 	cd dv/cocotb/soc && rm -rf sim_build_* results.xml dump.fst
+	rm -rf build dv/formal/rabbit5/build dv/formal/rabbit5/timing/timing_*
 	cd hw_ip/sim && uv run $(MAKE) clean
 
-.PHONY: help sync firmware soc-sim soc-waves ip-test lint rma-smoke ci clean
+.PHONY: help sync firmware soc-sim soc-waves ip-test lint rma-smoke formal gls-netlist gls-smoke ci clean

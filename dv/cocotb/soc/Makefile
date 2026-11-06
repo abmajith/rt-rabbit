@@ -8,7 +8,7 @@ PROG ?= hello
 
 include $(REPO)/rtl/cores/$(CORE)/core.mk
 
-FIRMWARE := $(REPO)/sw/baremetal/build/$(PROG)/$(PROG).hex
+FIRMWARE := $(REPO)/sw/baremetal/build/$(CORE)/$(PROG)/$(PROG).hex
 export RABBIT_FIRMWARE := $(FIRMWARE)
 export RABBIT_PROG := $(PROG)
 
@@ -19,9 +19,16 @@ COCOTB_TEST_MODULES = test_soc
 SIM_BUILD      ?= sim_build_$(CORE)
 
 # Sources come from the per-core and SoC file lists (${REPO} is expanded by Verilator).
+# GLS=1 replaces the core RTL by its gate-level netlist (see `make gls-netlist`).
 VERILOG_SOURCES =
-EXTRA_ARGS += -f $(REPO)/rtl/cores/$(CORE)/files.f -f $(REPO)/rtl/soc/files.f
-EXTRA_ARGS += $(CORE_VERILATOR_FLAGS) -DRABBIT_QUIET
+ifeq ($(GLS),1)
+NETLIST    := $(REPO)/build/gls/$(CORE)/rabbit_cpu_netlist.v
+EXTRA_ARGS += $(NETLIST) -Wno-fatal -DRABBIT_GLS
+SIM_BUILD   = sim_build_$(CORE)_gls
+else
+EXTRA_ARGS += -f $(REPO)/rtl/cores/$(CORE)/files.f $(CORE_VERILATOR_FLAGS)
+endif
+EXTRA_ARGS += -f $(REPO)/rtl/soc/files.f -DRABBIT_QUIET
 ifeq ($(WAVES),1)
 # Build with tracing, switch it on at run time, and keep a separate build dir
 # (a traced model is slower, so the normal build stays trace-free).

@@ -2,20 +2,25 @@
 
 An open, verifiable **real-time RISC-V SoC** for robotics: RTL → verification →
 FPGA → open-source ASIC, evaluated with Zephyr and real-time Linux, with a
-vector / quantized-NN block. Five-year plan:
-[`docs/research/2026-11-04-soc-5yr-plan.md`](docs/research/2026-11-04-soc-5yr-plan.md).
+vector / quantized-NN block. Five-year plan and research notes are kept
+outside the repository.
 
-Baseline CPU: **OpenHW CV32E40P** (RV32IMC). Every layer above the CPU talks to
-a core-agnostic `rabbit_cpu` contract, so other cores (Ibex, CV32E40X, our own
-5-stage core) plug in the same way: [`rtl/cores/README.md`](rtl/cores/README.md).
+CPUs: **rabbit5**, our own timing-predictable 5-stage RV32I core
+([`rtl/cores/rabbit5/README.md`](rtl/cores/rabbit5/README.md)), and **OpenHW
+CV32E40P** (RV32IMC) as reference. Every layer above the CPU talks to a
+core-agnostic `rabbit_cpu` contract, so cores plug in the same way:
+[`rtl/cores/README.md`](rtl/cores/README.md).
 
 ## Quick start
 
 ```bash
 git clone --recursive git@github.com:abmajith/rt-rabbit.git && cd rt-rabbit
 uv sync
-make soc-sim     # run sw/baremetal/hello on CV32E40P in Verilator
-make ci          # everything CI runs
+make soc-sim                 # run sw/baremetal/hello on CV32E40P in Verilator
+make soc-sim CORE=rabbit5    # ... on our own core
+make formal                  # riscv-formal + timing properties for rabbit5 (~35 s)
+make gls-smoke CORE=rabbit5  # same firmware on the synthesized gate netlist
+make ci                      # lint + simulation tests
 ```
 
 Walkthrough: [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) ·

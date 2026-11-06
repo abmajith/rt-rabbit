@@ -1,4 +1,4 @@
-# Status (updated 2026-11-04)
+# Status (updated 2026-11-06)
 
 ## Works
 
@@ -9,6 +9,19 @@
 | hw_ip cocotb tests | `make ip-test` | 10 targets, 19 tests pass |
 | rma_analysis examples | `make rma-smoke` | 11 run, 1 expected failure |
 | GitHub Actions | `.github/workflows/ci.yml` | lint, soc-sim matrix, ip-test matrix, rma-smoke |
+
+## rabbit5 (own core) — M0 done on branch `rabbit5-m0`
+
+| Item | Command | Result |
+|---|---|---|
+| hello on rabbit5 (RV32I, 5-stage) | `make soc-sim CORE=rabbit5` | PASS, 3958 cycles |
+| riscv-formal | `make formal` | 45/45 PASS |
+| timing properties T1–T3 + covers | `make formal` | PASS (BMC 24) |
+| gate-level smoke (Yosys generic netlist) | `make gls-smoke CORE=rabbit5` | PASS, same 3958 cycles |
+
+Next (M1/M2): enable riscv-formal CSR checks, timer + external interrupt with a
+proven entry-latency bound, RISCOF compliance, then the dual-core TDM work (M4).
+Review guide: `rtl/cores/rabbit5/README.md`.
 
 ## Known issues
 
@@ -29,6 +42,7 @@
 - [x] Bare-metal toolchain flow (GCC → hex → $readmemh)
 - [x] Firmware-driven cocotb SoC test
 - [x] CI pipeline
+- [x] Own core rabbit5 v0 with riscv-formal, timing properties, GLS smoke (2026-11-06)
 - [ ] Machine timer (mtime/mtimecmp) + interrupt test (irq_i already exposed)
 - [ ] OBI→Wishbone bridge; attach PWM / QEI / telemetry to the CPU
 - [ ] UART (needed for FPGA and Zephyr console)

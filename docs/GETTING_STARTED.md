@@ -26,7 +26,7 @@ make ci          # lint + SoC firmware sim + 10 hw_ip tests + rma_analysis examp
 | 1 | `sw/baremetal/hello/main.c` | The C program: prints, self-checks, cycle count |
 | 2 | `sw/baremetal/common/crt0.S` | Reset → stack → zero .bss → `main` → write exit code |
 | 3 | `sw/baremetal/common/link.ld` | Vectors at 0x0, code at 0x80 (CPU boot address) |
-| 4 | `sw/baremetal/build/hello/hello.dis` | The actual instructions (after `make firmware`) |
+| 4 | `sw/baremetal/build/cv32e40p/hello/hello.dis` | The actual instructions (after `make firmware`) |
 | 5 | `rtl/soc/rabbit_soc_sim.sv` | CPU + RAM + sim-control, address decode |
 | 6 | `rtl/cores/cv32e40p/rabbit_cpu.sv` | How a vendor core is plugged into our contract |
 | 7 | `dv/cocotb/soc/test_soc.py` | Testbench: clock, reset, console capture, pass/fail |

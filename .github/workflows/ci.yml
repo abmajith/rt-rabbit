@@ -18,10 +18,14 @@ jobs:
   lint:
     runs-on: ubuntu-24.04
     container: { image: "verilator/verilator:v5.054", options: --entrypoint "" }
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [cv32e40p, rabbit5]
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
-      - run: verilator --version && make lint
+      - run: verilator --version && make lint CORE=${{ matrix.core }}
 
   soc-sim:
     # One job per (core, program). Add cores here as rtl/cores/<name>/ adapters land.
@@ -30,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        core: [cv32e40p]
+        core: [cv32e40p, rabbit5]
         prog: [hello]
     steps:
       - name: RISC-V GCC
@@ -45,7 +49,7 @@ jobs:
           name: soc-${{ matrix.core }}-${{ matrix.prog }}
           path: |
             dv/cocotb/soc/results.xml
-            sw/baremetal/build/${{ matrix.prog }}/${{ matrix.prog }}.dis
+            sw/baremetal/build/${{ matrix.core }}/${{ matrix.prog }}/${{ matrix.prog }}.dis
 
   ip-test:
     runs-on: ubuntu-24.04
@@ -63,6 +67,52 @@ jobs:
       - run: uv sync
       - working-directory: hw_ip/sim
         run: uv run make TARGET=${{ matrix.target }}   # non-zero exit on any failed test
+
+  # riscv-formal (45 checks) + rabbit5 timing properties. ~1 min on 4 cores.
+  formal:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: YosysHQ/setup-oss-cad-suite@v3
+        with: { version: "2026-11-04" }     # pinned: yosys, sby, boolector
+      - run: yosys -V && sby --version
+      - run: make formal
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: formal-results
+          path: |
+            dv/formal/rabbit5/build/riscv-formal/cores/rabbit5/checks/*/logfile.txt
+            dv/formal/rabbit5/build/riscv-formal/cores/rabbit5/checks/*/engine_0/*.vcd
+            dv/formal/rabbit5/timing/timing_*/logfile.txt
+            dv/formal/rabbit5/timing/timing_*/engine_0/*.vcd
+
+  # Gate-level smoke test: Yosys builds the netlist, the pinned Verilator image runs it.
+  gls-netlist:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: YosysHQ/setup-oss-cad-suite@v3
+        with: { version: "2026-11-04" }
+      - run: make gls-netlist CORE=rabbit5
+      - uses: actions/upload-artifact@v4
+        with: { name: gls-netlist-rabbit5, path: build/gls/rabbit5 }
+
+  gls-smoke:
+    needs: gls-netlist
+    runs-on: ubuntu-24.04
+    container: { image: "verilator/verilator:v5.054", options: --entrypoint "" }
+    steps:
+      - name: RISC-V GCC
+        run: apt-get update -q && apt-get install -y -q gcc-riscv64-unknown-elf libpython3.12-dev
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/download-artifact@v4
+        with: { name: gls-netlist-rabbit5, path: build/gls/rabbit5 }
+      - run: uv sync
+      - working-directory: dv/cocotb/soc
+        run: uv run make CORE=rabbit5 PROG=hello GLS=1
 
   rma-smoke:
     runs-on: ubuntu-24.04
