@@ -8,20 +8,23 @@
 | Lint of our RTL (`-Wall`, vendor code excluded) | `make lint` | clean |
 | hw_ip cocotb tests | `make ip-test` | 10 targets, 19 tests pass |
 | rma_analysis examples | `make rma-smoke` | 11 run, 1 expected failure |
-| GitHub Actions | `.github/workflows/ci.yml` | lint, soc-sim matrix, ip-test matrix, rma-smoke |
+| GitHub Actions | `.github/workflows/ci.yml` | lint, soc-sim matrix, ip-test matrix, rma-smoke, formal, GLS |
+| Interrupt self-test on CV32E40P (reference) | `make soc-sim PROG=irq` | PASS, 9095 cycles |
 
 ## Own cores: rabbit3 and rabbit5 (shared blocks in rtl/cores/rabbit_common)
 
 | Item | rabbit3 (3-stage) | rabbit5 (5-stage) |
 |---|---|---|
 | hello (`make soc-sim CORE=...`) | PASS, 3145 cycles | PASS, 3958 cycles |
+| interrupts + WFI (`PROG=irq`, same test passes on cv32e40p) | PASS, 7448 cycles | PASS, 9025 cycles |
 | riscv-formal (`make formal CORE=...`) | 45/45 | 45/45 |
-| timing properties T1–T3 + covers | PASS | PASS |
-| gate-level smoke (`make gls-smoke CORE=...`) | PASS, same cycles | PASS, same cycles |
-| size, Yosys generic gates | 10.3 k cells | 11.1 k cells |
+| timing properties T1–T4 + covers | PASS | PASS |
+| interrupt properties I1–I4, sleep W0–W2; worst-case latency (tight) | PASS, 4 cycles | PASS, 7 cycles |
+| gate-level smoke (`make gls-smoke CORE=...`) | PASS, same cycles (hello, irq) | PASS, same cycles (hello, irq) |
+| size, Yosys generic gates | 10.4 k cells | 11.5 k cells |
 
-Next (M1/M2): enable riscv-formal CSR checks, timer + external interrupt with a
-proven entry-latency bound, RISCOF compliance, then the dual-core TDM work (M4).
+Next: riscv-formal CSR checks, RISCOF compliance, Zmmul, then the dual-core
+TDM work (M4).
 Learning path: `rtl/cores/rabbit3/README.md`.
 
 ## Known issues
@@ -44,7 +47,7 @@ Learning path: `rtl/cores/rabbit3/README.md`.
 - [x] Firmware-driven cocotb SoC test
 - [x] CI pipeline
 - [x] Own core rabbit5 v0 with riscv-formal, timing properties, GLS smoke (2026-11-06)
-- [ ] Machine timer (mtime/mtimecmp) + interrupt test (irq_i already exposed)
+- [x] Machine timer (mtime/mtimecmp) + interrupt test; rabbit3/rabbit5 interrupts + WFI with proven latency (2026-11-06)
 - [ ] OBI→Wishbone bridge; attach PWM / QEI / telemetry to the CPU
 - [ ] UART (needed for FPGA and Zephyr console)
 - [ ] RISCOF + riscv-arch-test on CV32E40P (`dv/isa/`)

@@ -32,9 +32,17 @@
 //       and costs exactly 1 cycle (1 bubble).
 //   R4  Memory must answer in exactly 1 cycle (grant in the request cycle,
 //       data the next cycle).
-//   R5  Nothing else ever stalls the pipeline.
+//   R5  Nothing else ever stalls the pipeline, except WFI sleep (R7).
+//   R6  Interrupts are taken in X, on the instruction there, which does not
+//       retire (it runs again after MRET). The handler's first instruction
+//       retires at most TIMING_IRQ_LATENCY cycles after an enabled interrupt
+//       becomes pending (core.mk).
+//   R7  WFI is a redirect to pc+4 (R3). If no enabled interrupt is pending,
+//       fetch stops (core_sleep_o = 1) until one is; it restarts in the same
+//       cycle the interrupt appears.
 //
-// So the time between two consecutive retirements is 1 or 2 cycles.
+// So the time between two consecutive retirements is 1 or 2 cycles, plus the
+// cycles spent asleep, except around an interrupt (R6).
 // -----------------------------------------------------------------------------
 //
 // What an instruction does lives in rtl/cores/rabbit_common/ (shared with
@@ -69,7 +77,8 @@ module rabbit3_core
   output logic [31:0] data_wdata_o,
   input  logic [31:0] data_rdata_i,
 
-  input  logic [31:0] irq_i,          // not used in v0
+  input  logic [31:0] irq_i,          // interrupt lines: bit i = mip[i]
+  output logic        core_sleep_o,   // asleep after WFI (fetch stopped)
 
   // RVFI: one record per retired instruction, valid in its WB cycle
   output logic        rvfi_valid,
@@ -104,14 +113,27 @@ module rabbit3_core
   // F — instruction fetch
   // ===========================================================================
   logic [31:0] pc_q;           // address requested this cycle
+  logic        sleep_q;        // WFI: fetch stopped (R7)
+  logic        x_sleep;        // the instruction in X is a WFI that goes to sleep
+  logic        wake;           // an enabled interrupt is pending
+  logic        fetch;          // a fetch happens this cycle
 
-  assign instr_req_o  = fetch_enable_i;
+  assign fetch        = fetch_enable_i && (!sleep_q || wake);
+  assign instr_req_o  = fetch;
   assign instr_addr_o = pc_q;
+  assign core_sleep_o = sleep_q;
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
-    if (!rst_ni)              pc_q <= BOOT_ADDR;
-    else if (redirect)        pc_q <= redirect_pc;   // R3
-    else if (fetch_enable_i)  pc_q <= pc_q + 32'd4;
+    if (!rst_ni)       pc_q <= BOOT_ADDR;
+    else if (redirect) pc_q <= redirect_pc;   // R3
+    else if (fetch)    pc_q <= pc_q + 32'd4;
+  end
+
+  // WFI in X: the redirect has already pointed pc_q at pc+4; just stop here
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni)      sleep_q <= 1'b0;
+    else if (x_sleep) sleep_q <= 1'b1;
+    else if (wake)    sleep_q <= 1'b0;
   end
 
   // ===========================================================================
@@ -127,7 +149,7 @@ module rabbit3_core
     end else if (redirect) begin            // the word in flight is wrong-path
       x_valid_q <= 1'b0;
     end else begin
-      x_valid_q <= fetch_enable_i;
+      x_valid_q <= fetch;
       x_pc_q    <= pc_q;
     end
   end
@@ -156,7 +178,10 @@ module rabbit3_core
     .rs2_i        (x_rs2_val),
     .res_o        (x_res),
     .redirect_o   (redirect),
-    .redirect_pc_o(redirect_pc)
+    .redirect_pc_o(redirect_pc),
+    .irq_i,
+    .sleep_o      (x_sleep),
+    .wake_o       (wake)
   );
 
   // the data access leaves directly from X; the answer arrives in W (rule R4)
@@ -196,6 +221,6 @@ module rabbit3_core
 `endif
 
   logic unused;
-  assign unused = ^{instr_rvalid_i, data_rvalid_i, irq_i};
+  assign unused = ^{instr_rvalid_i, data_rvalid_i};
 
 endmodule

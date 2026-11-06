@@ -10,8 +10,8 @@ Everything an instruction *does* lives here. A rabbit core
 | `rabbit_decoder.sv` | combinational | 32 instruction bits → `decoded_t`; marks unsupported encodings as illegal |
 | `rabbit_alu.sv` | combinational | the ten RV32I ALU operations |
 | `rabbit_regfile.sv` | state | 31 × 32-bit registers (x0 = 0), 2 read ports, 1 write port, write-first bypass |
-| `rabbit_csr.sv` | state | machine-mode CSRs, counters, trap entry, MRET |
-| `rabbit_execute.sv` | combinational + CSR state | ALU operands, branch/jump decision, exceptions, CSR access, next pc → `exec_t` + redirect |
+| `rabbit_csr.sv` | state | machine-mode CSRs, counters, trap entry, MRET, interrupt enables (`mie`, `mip`, `mstatus.MIE`) and priority |
+| `rabbit_execute.sv` | combinational + CSR state | ALU operands, branch/jump decision, exceptions, interrupts, WFI, CSR access, next pc → `exec_t` + redirect |
 | `rabbit_rvfi.sv` | small state | turns the retiring `exec_t` into the RVFI port used by formal verification |
 
 ```

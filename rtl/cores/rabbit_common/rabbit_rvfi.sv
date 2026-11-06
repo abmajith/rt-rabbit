@@ -49,7 +49,7 @@ module rabbit_rvfi
   assign rvfi_insn      = retire_i.instr;
   assign rvfi_trap      = retire_i.trap;
   assign rvfi_halt      = 1'b0;
-  assign rvfi_intr      = 1'b0;
+  assign rvfi_intr      = retire_i.intr;  // first instruction of an interrupt handler
   assign rvfi_mode      = 2'd3;          // machine mode
   assign rvfi_ixl       = 2'd1;          // 32-bit
   assign rvfi_rs1_addr  = retire_i.rs1_addr;

@@ -11,6 +11,17 @@
 // here and all CSR state changes here. An instruction that leaves execute
 // without a trap is guaranteed to retire.
 //
+// Interrupts are taken here too. If an enabled interrupt is pending while a
+// valid instruction is in execute, that instruction is NOT executed: it does
+// not retire (res_o.valid = 0), changes nothing, and its pc goes to mepc, so
+// MRET will run it later. Everything older has already passed the commit
+// point and simply finishes. The first instruction of the handler is marked
+// res_o.intr = 1 (RVFI convention).
+//
+// WFI is executed as a jump to pc+4 (so nothing fetched after it runs) and
+// asks the pipeline to sleep (sleep_o) unless an enabled interrupt is
+// already pending. The pipeline stops fetching until wake_o.
+//
 //   operands ─► ALU ─────────────► result / load-store address
 //           └─► branch unit ─────► taken? target?
 //           └─► CSR unit ────────► old CSR value, trap entry, MRET
@@ -35,8 +46,26 @@ module rabbit_execute
 
   output exec_t       res_o,
   output logic        redirect_o,    // control flow changes: fetch from redirect_pc_o
-  output logic [31:0] redirect_pc_o
+  output logic [31:0] redirect_pc_o,
+
+  input  logic [31:0] irq_i,         // interrupt request lines (see rabbit_pkg)
+  output logic        sleep_o,       // WFI executed: stop fetching ...
+  output logic        wake_o         // ... until this is 1
 );
+
+  // ---- interrupt: replaces the instruction in execute -------------------------
+  logic       irq_pending, irq_take;
+  logic [4:0] irq_id;
+  assign irq_take = valid_i && irq_pending;
+
+  // RVFI: the next instruction that executes is the first one of the handler
+  logic intr_next_q;
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni)       intr_next_q <= 1'b0;
+    else if (irq_take) intr_next_q <= 1'b1;
+    else if (valid_i)  intr_next_q <= 1'b0;
+  end
+
 
   // ---- ALU ------------------------------------------------------------------
   logic [31:0] alu_a, alu_b, alu_y;
@@ -71,7 +100,8 @@ module rabbit_execute
   always_comb begin
     trap      = 1'b1;
     trap_tval = 32'b0;
-    if      (dec_i.illegal || csr_illegal) begin trap_cause = CAUSE_ILLEGAL_INSN; trap_tval = instr_i; end
+    if      (irq_pending)                  trap_cause = {1'b1, 26'b0, irq_id};
+    else if (dec_i.illegal || csr_illegal) begin trap_cause = CAUSE_ILLEGAL_INSN; trap_tval = instr_i; end
     else if (dec_i.is_ecall)               trap_cause = CAUSE_ECALL_M;
     else if (dec_i.is_ebreak)              trap_cause = CAUSE_BREAKPOINT;
     else if (target_misaligned)    begin trap_cause = CAUSE_INSN_MISALIGNED; trap_tval = jump_target; end
@@ -91,7 +121,7 @@ module rabbit_execute
 
   rabbit_csr #(.MTVEC_RESET(MTVEC_RESET), .HART_ID(HART_ID)) u_csr (
     .clk_i, .rst_ni,
-    .csr_valid_i  (valid_i && dec_i.is_csr),
+    .csr_valid_i  (valid_i && dec_i.is_csr && !irq_pending),
     .csr_addr_i   (instr_i[31:20]),
     .csr_op_i     (dec_i.funct3[1:0]),
     .csr_write_i  (csr_write_req),
@@ -102,8 +132,12 @@ module rabbit_execute
     .trap_cause_i (trap_cause),
     .trap_pc_i    (pc_i),
     .trap_tval_i  (trap_tval),
-    .mret_i       (valid_i && dec_i.is_mret),
+    .mret_i       (valid_i && dec_i.is_mret && !trap),
     .instret_i    (valid_i && !trap),
+    .irq_i,
+    .irq_wake_o   (wake_o),
+    .irq_pending_o(irq_pending),
+    .irq_id_o     (irq_id),
     .mtvec_o      (mtvec),
     .mepc_o       (mepc)
   );
@@ -111,22 +145,26 @@ module rabbit_execute
   // ---- next pc and redirect ------------------------------------------------------
   logic [31:0] next_pc;
   always_comb begin
-    if      (trap)          next_pc = mtvec;
+    if      (trap)          next_pc = trap_target(mtvec, irq_take, irq_id);
     else if (dec_i.is_mret) next_pc = mepc;
     else if (taken)         next_pc = jump_target;
     else                    next_pc = pc_i + 32'd4;
   end
-  assign redirect_o    = valid_i && (trap || dec_i.is_mret || taken);
+  assign redirect_o    = valid_i && (trap || dec_i.is_mret || taken || dec_i.is_wfi);
   assign redirect_pc_o = next_pc;
+
+  // ---- WFI ----------------------------------------------------------------------
+  assign sleep_o = valid_i && dec_i.is_wfi && !trap && !wake_o;
 
   // ---- the result record ------------------------------------------------------------
   always_comb begin
     res_o           = '0;
-    res_o.valid     = valid_i;
+    res_o.valid     = valid_i && !irq_take;   // an interrupted instruction never retires
     res_o.pc        = pc_i;
     res_o.instr     = instr_i;
     res_o.next_pc   = next_pc;
     res_o.trap      = trap;
+    res_o.intr      = intr_next_q;
     res_o.writes_rd = dec_i.writes_rd && !trap;    // a trap has no side effects
     res_o.rd        = dec_i.rd;
     unique case (dec_i.res)

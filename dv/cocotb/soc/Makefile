@@ -38,6 +38,16 @@ SIM_BUILD   = sim_build_$(CORE)_waves
 endif
 PLUSARGS   += +firmware=$(FIRMWARE)
 
+# The sources are passed with -f, which cocotb cannot see: list them as
+# dependencies so that editing any RTL file rebuilds the simulator.
+expand_f = $(shell grep -v '^//' $(1) | sed 's|$${REPO}|$(REPO)|')
+CUSTOM_COMPILE_DEPS += $(call expand_f,$(REPO)/rtl/soc/files.f)
+ifeq ($(GLS),1)
+CUSTOM_COMPILE_DEPS += $(NETLIST)
+else
+CUSTOM_COMPILE_DEPS += $(filter %.sv %.v,$(call expand_f,$(REPO)/rtl/cores/$(CORE)/files.f))
+endif
+
 COCOTB_HDL_TIMEUNIT      = 1ns
 COCOTB_HDL_TIMEPRECISION = 1ps
 
