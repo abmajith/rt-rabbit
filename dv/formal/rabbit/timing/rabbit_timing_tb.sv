@@ -1,17 +1,24 @@
 // =============================================================================
-// rabbit5 timing properties (beyond riscv-formal)
+// rabbit timing properties (beyond riscv-formal) — one testbench, every core
 // =============================================================================
 // riscv-formal proves WHAT each instruction computes. These properties prove
-// WHEN: they turn the "TIMING RULES" comment in rabbit5_core.sv into checked
+// WHEN: they turn the "TIMING RULES" comment of a rabbit core into checked
 // facts. They look only at the RVFI trace and the memory bus, so they treat the
-// core as a black box and can be reused for any future rabbit core.
+// core as a black box.
+//
+// The core and its timing model come from rtl/cores/<core>/core.mk, passed in
+// as macros by the Makefile:
+//   RABBIT_CORE    module name             (rabbit3_core / rabbit5_core)
+//   FIRST_RETIRE   cycle of the first retirement after reset (5 / 3)
+//   REDIRECT_GAP   cycles between a redirecting instruction and the next (3 / 2)
+//   LOADUSE_GAP    cycles between a load and an instruction using it    (2 / 1)
 //
 //   T1  exact timing model: the gap between two consecutive retirements is
-//         3 cycles  if the earlier instruction changed control flow
-//                   (taken branch, JAL, JALR, MRET, trap)            [rule R3]
-//         2 cycles  if the later one reads the register the earlier
-//                   one loaded (load-use)                            [rule R2]
-//         1 cycle   otherwise                                        [rule R1]
+//         REDIRECT_GAP  if the earlier instruction changed control flow
+//                       (taken branch, JAL, JALR, MRET, trap)        [rule R3]
+//         LOADUSE_GAP   if the later one reads the register the
+//                       earlier one loaded (load-use)                [rule R2]
+//         1             otherwise                                    [rule R1]
 //   T2  the first instruction retires exactly FIRST_RETIRE cycles after reset
 //   T3  a data-memory request happens exactly one cycle before the instruction
 //       that made it retires, and never at any other time            [rule R4]
@@ -22,14 +29,19 @@
 //   - bounded interrupt latency, once interrupts exist (M2)
 //   - for the dual core (M4): core 0's T1 gaps never depend on core 1
 // =============================================================================
-module rabbit5_timing_tb (
-    input logic clk
+module rabbit_timing_tb (
+    input logic        clk,
+    // Free inputs: the solver may choose ANY instruction word and ANY load
+    // data in every cycle. They are top-level inputs on purpose: an
+    // (* anyseq *) attribute is silently dropped by the slang frontend, and
+    // the signal would become a "don't care" constant that the solver may
+    // choose differently at every place it is used.
+    input logic [31:0] instr_rdata,
+    input logic [31:0] data_rdata
 );
-  localparam int FIRST_RETIRE = 5;
-
-  // ---- free inputs: any instruction, any load data, every cycle -------------
-  (* anyseq *) logic [31:0] instr_rdata;
-  (* anyseq *) logic [31:0] data_rdata;
+  localparam int FIRST_RETIRE = `FIRST_RETIRE;
+  localparam int REDIRECT_GAP = `REDIRECT_GAP;
+  localparam int LOADUSE_GAP  = `LOADUSE_GAP;
 
   // ---- reset for exactly the first cycle -------------------------------------
   logic rst_n = 1'b0;
@@ -41,7 +53,7 @@ module rabbit5_timing_tb (
   logic [4:0]  rvfi_rs1_addr, rvfi_rs2_addr, rvfi_rd_addr;
   logic [3:0]  rvfi_mem_rmask, rvfi_mem_wmask;
 
-  rabbit5_core dut (
+  `RABBIT_CORE dut (
       .clk_i(clk), .rst_ni(rst_n), .fetch_enable_i(1'b1),
       .instr_req_o(), .instr_gnt_i(1'b1), .instr_rvalid_i(1'b1),
       .instr_addr_o(), .instr_rdata_i(instr_rdata),
@@ -60,7 +72,7 @@ module rabbit5_timing_tb (
   );
 
   // ---- classify the instruction that retires now ------------------------------
-  // (the ISA-level meaning only; nothing about how rabbit5 is built)
+  // (the ISA-level meaning only; nothing about how the core is built)
   logic [6:0] opcode;
   logic [2:0] funct3;
   assign opcode = rvfi_insn[6:0];
@@ -119,7 +131,7 @@ module rabbit5_timing_tb (
                     (rvfi_rs1_addr == prev_rd || rvfi_rs2_addr == prev_rd);
 
   int expected_gap;
-  assign expected_gap = prev_flow ? 3 : (load_use ? 2 : 1);
+  assign expected_gap = prev_flow ? REDIRECT_GAP : (load_use ? LOADUSE_GAP : 1);
 
   // ---- T1, T2 ------------------------------------------------------------------------
   always_comb begin
@@ -139,9 +151,12 @@ module rabbit5_timing_tb (
   end
 
   // ---- throughput bounds ------------------------------------------------------------------
-  // From T1 + T2: after the first retirement (cycle 4), every 1..3 cycles one
-  // more instruction retires. So at cycle 19 between 6 and 16 have retired.
+  // From T1 + T2: after the first retirement (cycle FIRST_RETIRE-1), one more
+  // instruction retires every 1..REDIRECT_GAP cycles. So at cycle 19 between
+  // MIN_AT_19 and MAX_AT_19 have retired (rabbit5: 6..16, rabbit3: 9..18).
   // Both extremes must be reachable (covers below).
+  localparam int MAX_AT_19 = 19 - (FIRST_RETIRE - 1) + 1;
+  localparam int MIN_AT_19 = (19 - (FIRST_RETIRE - 1)) / REDIRECT_GAP + 1;
   int retired;
   always_ff @(posedge clk) begin
     if (!rst_n)          retired <= 0;
@@ -153,15 +168,14 @@ module rabbit5_timing_tb (
   // ---- non-vacuity: every case of T1 must really happen ------------------------------------
   always_comb begin
     if (rst_n && cycle == 19) begin
-      cover (retired_now == 6);    // slowest possible: every instruction redirects
-      cover (retired_now == 16);   // fastest possible: no bubbles at all
+      cover (retired_now == MIN_AT_19);   // slowest possible: every instruction redirects
+      cover (retired_now == MAX_AT_19);   // fastest possible: no bubbles at all
     end
     if (rst_n && rvfi_valid && seen_one) begin
       cover (gap == 1);
-      cover (gap == 2);
-      cover (gap == 3);
-      cover (gap == 2 && load_use);
-      cover (gap == 3 && rvfi_trap);
+      cover (gap == LOADUSE_GAP && load_use);
+      cover (gap == REDIRECT_GAP);
+      cover (gap == REDIRECT_GAP && rvfi_trap);
     end
   end
 endmodule

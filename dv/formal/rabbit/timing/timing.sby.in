@@ -1,0 +1,20 @@
+# Template: the Makefile fills in the core's sources and timing model.
+#   make -C dv/formal/rabbit timing CORE=rabbit3
+[tasks]
+bmc
+cover
+
+[options]
+bmc:   mode bmc
+cover: mode cover
+depth 24
+
+[engines]
+smtbmc boolector
+
+[script]
+script slang_load.ys
+read_slang @SOURCES@ --top rabbit_timing_tb @DEFINES@
+prep -top rabbit_timing_tb
+
+[files]

@@ -5,7 +5,7 @@
 #   make ip-test        run every hw_ip cocotb unit/integration test
 #   make lint           Verilator lint of the SoC
 #   make rma-smoke      run all rma_analysis example configs
-#   make formal         riscv-formal + timing properties (CORE=rabbit5 only)
+#   make formal         riscv-formal + timing properties (CORE=rabbit3|rabbit5)
 #   make gls-smoke      synthesize the core with Yosys, run firmware on the netlist
 #   make ci             everything CI runs
 REPO := $(abspath .)
@@ -61,8 +61,10 @@ rma-smoke: sync
 	done
 
 # ---- formal (rabbit5) ---------------------------------------------------------
+# formal works on our own cores; with the default CORE (cv32e40p) it runs rabbit5
+FORMAL_CORE := $(if $(filter rabbit%,$(CORE)),$(CORE),rabbit5)
 formal:
-	$(MAKE) -C dv/formal/rabbit5
+	$(MAKE) -C dv/formal/rabbit CORE=$(FORMAL_CORE)
 
 # ---- gate-level smoke test: generic Yosys gates, zero delay ----------------------
 # Catches RTL that simulates differently from what synthesizes (latches, X,
@@ -87,7 +89,7 @@ ci: lint soc-sim ip-test rma-smoke
 clean:
 	$(MAKE) -C sw/baremetal clean
 	cd dv/cocotb/soc && rm -rf sim_build_* results.xml dump.fst
-	rm -rf build dv/formal/rabbit5/build dv/formal/rabbit5/timing/timing_*
+	rm -rf build dv/formal/rabbit/build
 	cd hw_ip/sim && uv run $(MAKE) clean
 
 .PHONY: help sync firmware soc-sim soc-waves ip-test lint rma-smoke formal gls-netlist gls-smoke ci clean

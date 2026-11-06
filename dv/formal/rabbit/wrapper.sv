@@ -1,11 +1,11 @@
-// riscv-formal wrapper for rabbit5.
+// riscv-formal wrapper for the rabbit cores (RABBIT_CORE is set by the Makefile).
 //
 // The solver may choose ANY instruction word and ANY load data in every
 // cycle (`rvformal_rand_reg). That is what makes the checks exhaustive: every
 // instruction sequence up to the check depth is covered, not just programs we
 // thought of.
 //
-// Memory contract (rabbit5 rule R4): requests are granted immediately and the
+// Memory contract (rule R4 of every rabbit core): requests are granted immediately and the
 // answer comes one cycle later. We model exactly that and nothing more.
 module rvfi_wrapper (
     input clock,
@@ -23,7 +23,7 @@ module rvfi_wrapper (
     (* keep *) wire [31:0] data_addr;
     (* keep *) wire [31:0] data_wdata;
 
-    rabbit5_core uut (
+    `RABBIT_CORE uut (
         .clk_i          (clock),
         .rst_ni         (!reset),
         .fetch_enable_i (1'b1),

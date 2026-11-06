@@ -1,8 +1,8 @@
 // =============================================================================
-// rabbit5_alu — RV32I integer ALU (pure combinational, one cycle)
+// rabbit_alu — RV32I integer ALU (pure combinational, one cycle)
 // =============================================================================
-module rabbit5_alu
-  import rabbit5_pkg::*;
+module rabbit_alu
+  import rabbit_pkg::*;
 (
   input  alu_op_e     op_i,
   input  logic [31:0] a_i,

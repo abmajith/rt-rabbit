@@ -1,5 +1,5 @@
 // =============================================================================
-// rabbit5_core — 5-stage in-order RV32I pipeline (v0, single hart)
+// rabbit5_core — 5-stage in-order RV32I pipeline (single hart)
 // =============================================================================
 //
 //   cycle:   1    2    3    4    5    6
@@ -13,7 +13,8 @@
 //   WB  : load data arrives; write register; report to RVFI
 //
 // -----------------------------------------------------------------------------
-// TIMING RULES (the whole timing model of v0 — checked in dv/formal/rabbit5/timing)
+// TIMING RULES (checked in dv/formal/rabbit/timing with CORE=rabbit5;
+//               the numbers are declared in core.mk)
 // -----------------------------------------------------------------------------
 //   R1  One instruction retires per cycle, except:
 //   R2  Load-use: if an instruction reads the register loaded by the load
@@ -30,12 +31,18 @@
 // cycles and depends only on those two instructions.
 // -----------------------------------------------------------------------------
 //
+// This file is ONLY the pipeline: stage registers, hazards, forwarding.
+// What an instruction does is in rtl/cores/rabbit_common/ (shared with rabbit3):
+//   rabbit_decoder (ID), rabbit_regfile, rabbit_execute (EX, incl. CSRs/traps),
+//   rabbit_rvfi (reporting). Compare with rabbit3_core.sv to see what two
+//   extra stages cost and buy.
+//
 // Bus: OBI-style request/grant/rvalid, as in the rabbit_cpu contract.
 // Verification port: RVFI (riscv-formal interface), always present; it costs
 // nothing in synthesis when left unconnected.
 // =============================================================================
 module rabbit5_core
-  import rabbit5_pkg::*;
+  import rabbit_pkg::*;
 #(
   parameter logic [31:0] BOOT_ADDR  = 32'h0000_0080,
   parameter logic [31:0] MTVEC_ADDR = 32'h0000_0000,
@@ -89,43 +96,26 @@ module rabbit5_core
 );
 
   // ===========================================================================
-  // Pipeline registers. Each struct is "what this stage needs to know".
+  // Pipeline registers
   // ===========================================================================
-
-  // ID/EX
+  // ID/EX: a decoded instruction plus the register values read in ID
   typedef struct packed {
     logic        valid;
     logic [31:0] pc;
     logic [31:0] instr;
     decoded_t    dec;
-    logic [31:0] rs1_val;   // register values read in ID (EX may forward newer ones)
+    logic [31:0] rs1_val;   // EX may replace these by newer values (forwarding)
     logic [31:0] rs2_val;
   } ex_stage_t;
 
-  // EX/MEM and MEM/WB (same content; WB additionally receives load data)
-  typedef struct packed {
-    logic        valid;
-    logic [31:0] pc;
-    logic [31:0] instr;
-    logic [31:0] next_pc;   // where the program goes after this instruction
-    logic        trap;      // instruction trapped in EX: no side effects
-    logic        writes_rd;
-    logic [4:0]  rd;
-    logic [31:0] result;    // ALU / link / CSR value (loads: filled in WB)
-    logic        is_load;
-    logic        is_store;
-    logic [2:0]  funct3;    // load/store size and sign
-    logic [31:0] addr;      // byte address of the load/store
-    logic [31:0] store_data;
-    logic [4:0]  rs1_addr;  // for RVFI only
-    logic [4:0]  rs2_addr;
-    logic [31:0] rs1_val;
-    logic [31:0] rs2_val;
-  } mem_stage_t;
+  ex_stage_t ex_q;      // ID/EX
+  exec_t     mem_q;     // EX/MEM : result of rabbit_execute
+  exec_t     wb_q;      // MEM/WB : same record, one stage later
 
   logic        redirect;       // EX changes control flow this cycle
   logic [31:0] redirect_pc;
   logic        stall;          // ID must wait one cycle (load-use)
+  logic [31:0] wb_result;      // final register value of the instruction in WB
 
   // ===========================================================================
   // IF — instruction fetch
@@ -177,28 +167,16 @@ module rabbit5_core
   end
 
   decoded_t id_dec;
-  rabbit5_decoder u_decoder (.instr_i(id_instr), .dec_o(id_dec));
+  rabbit_decoder u_decoder (.instr_i(id_instr), .dec_o(id_dec));
 
-  // Register file: read in ID, written in WB
-  logic        rf_we;
-  logic [4:0]  rf_waddr;
-  logic [31:0] rf_wdata;
+  // Register file: read in ID, written in WB (write-first bypass inside)
   logic [31:0] id_rs1_val, id_rs2_val;
-
-  rabbit5_regfile u_regfile (
+  rabbit_regfile u_regfile (
     .clk_i,
     .raddr_a_i(id_dec.rs1), .rdata_a_o(id_rs1_val),
     .raddr_b_i(id_dec.rs2), .rdata_b_o(id_rs2_val),
-    .we_i(rf_we), .waddr_i(rf_waddr), .wdata_i(rf_wdata)
+    .we_i(wb_q.valid && wb_q.writes_rd), .waddr_i(wb_q.rd), .wdata_i(wb_result)
   );
-
-  // ===========================================================================
-  // EX — execute (ex_q is the ID/EX pipeline register)
-  // ===========================================================================
-  ex_stage_t  ex_q;
-  mem_stage_t mem_q;   // EX/MEM
-  mem_stage_t wb_q;    // MEM/WB
-  logic [31:0] wb_result;
 
   // Load-use hazard (rule R2): the load is in EX now, its data only exists
   // in WB, two cycles from now. Hold the dependent instruction for one cycle.
@@ -221,7 +199,11 @@ module rabbit5_core
     end
   end
 
-  // ---- forwarding: use the newest value of a register -----------------------
+  // ===========================================================================
+  // EX — forwarding + rabbit_execute
+  // ===========================================================================
+  // The values read in ID may be out of date: an older instruction that is
+  // now in MEM or WB has not written the register file yet. Use the newest.
   // Priority: MEM (younger) over WB (older) over the value read in ID.
   // A load in MEM never needs forwarding here: R2 guarantees a bubble.
   function automatic logic [31:0] forward(input logic [4:0] r, input logic [31:0] id_val);
@@ -230,252 +212,53 @@ module rabbit5_core
     else                                                                         return id_val;
   endfunction
 
-  logic [31:0] rs1, rs2;
-  assign rs1 = forward(ex_q.dec.rs1, ex_q.rs1_val);
-  assign rs2 = forward(ex_q.dec.rs2, ex_q.rs2_val);
-
-  // ---- ALU ------------------------------------------------------------------
-  logic [31:0] alu_a, alu_b, alu_y;
-  always_comb begin
-    unique case (ex_q.dec.opa)
-      OPA_RS1: alu_a = rs1;
-      OPA_PC : alu_a = ex_q.pc;
-      default: alu_a = 32'b0;
-    endcase
-    alu_b = (ex_q.dec.opb == OPB_RS2) ? rs2 : ex_q.dec.imm;
-  end
-
-  rabbit5_alu u_alu (.op_i(ex_q.dec.alu_op), .a_i(alu_a), .b_i(alu_b), .y_o(alu_y));
-
-  // ---- branches and jumps -----------------------------------------------------
-  logic        branch_cond;
-  always_comb begin
-    unique case (ex_q.dec.funct3)
-      3'b000 : branch_cond = (rs1 == rs2);                     // BEQ
-      3'b001 : branch_cond = (rs1 != rs2);                     // BNE
-      3'b100 : branch_cond = ($signed(rs1) <  $signed(rs2));   // BLT
-      3'b101 : branch_cond = ($signed(rs1) >= $signed(rs2));   // BGE
-      3'b110 : branch_cond = (rs1 <  rs2);                     // BLTU
-      3'b111 : branch_cond = (rs1 >= rs2);                     // BGEU
-      default: branch_cond = 1'b0;
-    endcase
-  end
-
-  logic        taken;
-  logic [31:0] jump_target;
-  assign taken       = ex_q.dec.is_jal || ex_q.dec.is_jalr || (ex_q.dec.is_branch && branch_cond);
-  assign jump_target = ex_q.dec.is_jalr ? ((rs1 + ex_q.dec.imm) & ~32'd1)
-                                        : (ex_q.pc + ex_q.dec.imm);
-
-  // ---- exceptions (all detected here, in EX) -----------------------------------
-  logic        csr_illegal;
-  logic        target_misaligned, mem_misaligned;
-  assign target_misaligned = taken && (jump_target[1:0] != 2'b00);
-  always_comb begin
-    unique case (ex_q.dec.funct3[1:0])
-      2'b00  : mem_misaligned = 1'b0;                  // byte
-      2'b01  : mem_misaligned = alu_y[0];              // half word
-      default: mem_misaligned = (alu_y[1:0] != 2'b00); // word
-    endcase
-    mem_misaligned = mem_misaligned && (ex_q.dec.is_load || ex_q.dec.is_store);
-  end
-
-  logic        trap;
-  logic [31:0] trap_cause, trap_tval;
-  always_comb begin
-    trap       = 1'b1;
-    trap_tval  = 32'b0;
-    if      (ex_q.dec.illegal || csr_illegal) begin trap_cause = CAUSE_ILLEGAL_INSN; trap_tval = ex_q.instr; end
-    else if (ex_q.dec.is_ecall)               trap_cause = CAUSE_ECALL_M;
-    else if (ex_q.dec.is_ebreak)              trap_cause = CAUSE_BREAKPOINT;
-    else if (target_misaligned)       begin trap_cause = CAUSE_INSN_MISALIGNED; trap_tval = jump_target; end
-    else if (mem_misaligned)          begin
-      trap_cause = ex_q.dec.is_load ? CAUSE_LOAD_MISALIGNED : CAUSE_STORE_MISALIGNED;
-      trap_tval  = alu_y;
-    end
-    else begin trap = 1'b0; trap_cause = 32'b0; end
-    trap = trap && ex_q.valid;
-  end
-
-  // ---- CSRs -------------------------------------------------------------------
-  logic [31:0] csr_rdata, mtvec, mepc;
-  logic        csr_write_req;
-  // CSRRW(I) always writes; CSRRS/CSRRC(I) write only if the rs1 field is not 0
-  assign csr_write_req = (ex_q.dec.funct3[1:0] == 2'b01) || (ex_q.dec.rs1 != 5'd0);
-
-  rabbit5_csr #(.MTVEC_RESET(MTVEC_ADDR), .HART_ID(HART_ID)) u_csr (
+  exec_t ex_res;
+  rabbit_execute #(.MTVEC_RESET(MTVEC_ADDR), .HART_ID(HART_ID)) u_execute (
     .clk_i, .rst_ni,
-    .csr_valid_i  (ex_q.valid && ex_q.dec.is_csr),
-    .csr_addr_i   (ex_q.instr[31:20]),
-    .csr_op_i     (ex_q.dec.funct3[1:0]),
-    .csr_write_i  (csr_write_req),
-    .csr_src_i    (ex_q.dec.funct3[2] ? ex_q.dec.imm : rs1),
-    .csr_rdata_o  (csr_rdata),
-    .csr_illegal_o(csr_illegal),
-    .trap_i       (trap),
-    .trap_cause_i (trap_cause),
-    .trap_pc_i    (ex_q.pc),
-    .trap_tval_i  (trap_tval),
-    .mret_i       (ex_q.valid && ex_q.dec.is_mret),
-    .instret_i    (ex_q.valid && !trap),
-    .mtvec_o      (mtvec),
-    .mepc_o       (mepc)
+    .valid_i      (ex_q.valid),
+    .pc_i         (ex_q.pc),
+    .instr_i      (ex_q.instr),
+    .dec_i        (ex_q.dec),
+    .rs1_i        (forward(ex_q.dec.rs1, ex_q.rs1_val)),
+    .rs2_i        (forward(ex_q.dec.rs2, ex_q.rs2_val)),
+    .res_o        (ex_res),
+    .redirect_o   (redirect),
+    .redirect_pc_o(redirect_pc)
   );
 
-  // ---- next pc and redirect (rule R3) -------------------------------------------
-  logic [31:0] next_pc;
-  always_comb begin
-    if      (trap)             next_pc = mtvec;
-    else if (ex_q.dec.is_mret) next_pc = mepc;
-    else if (taken)            next_pc = jump_target;
-    else                       next_pc = ex_q.pc + 32'd4;
-  end
-  assign redirect    = ex_q.valid && (trap || ex_q.dec.is_mret || taken);
-  assign redirect_pc = next_pc;
-
-  // ---- EX result ------------------------------------------------------------------
-  logic [31:0] ex_result;
-  always_comb begin
-    unique case (ex_q.dec.res)
-      RES_PC4: ex_result = ex_q.pc + 32'd4;
-      RES_CSR: ex_result = csr_rdata;
-      default: ex_result = alu_y;
-    endcase
-  end
-
-  // ---- EX/MEM register --------------------------------------------------------------
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) mem_q <= '0;
-    else begin
-      mem_q.valid      <= ex_q.valid;
-      mem_q.pc         <= ex_q.pc;
-      mem_q.instr      <= ex_q.instr;
-      mem_q.next_pc    <= next_pc;
-      mem_q.trap       <= trap;
-      mem_q.writes_rd  <= ex_q.dec.writes_rd && !trap;   // a trap has no side effects
-      mem_q.rd         <= ex_q.dec.rd;
-      mem_q.result     <= ex_result;
-      mem_q.is_load    <= ex_q.dec.is_load  && !trap;
-      mem_q.is_store   <= ex_q.dec.is_store && !trap;
-      mem_q.funct3     <= ex_q.dec.funct3;
-      mem_q.addr       <= alu_y;
-      mem_q.store_data <= rs2;
-      mem_q.rs1_addr   <= ex_q.dec.uses_rs1 ? ex_q.dec.rs1 : 5'd0;
-      mem_q.rs2_addr   <= ex_q.dec.uses_rs2 ? ex_q.dec.rs2 : 5'd0;
-      mem_q.rs1_val    <= ex_q.dec.uses_rs1 ? rs1 : 32'd0;
-      mem_q.rs2_val    <= ex_q.dec.uses_rs2 ? rs2 : 32'd0;
-    end
+    else         mem_q <= ex_res;
   end
 
   // ===========================================================================
-  // MEM — issue the data access (answer arrives in WB, rule R4)
+  // MEM — issue the data access (the answer arrives in WB, rule R4)
   // ===========================================================================
-  // Byte enables for the 4 bytes of the addressed word
-  function automatic logic [3:0] byte_mask(input logic [1:0] size, input logic [1:0] offset);
-    unique case (size)
-      2'b00  : return 4'b0001 << offset;   // byte
-      2'b01  : return 4'b0011 << offset;   // half word
-      default: return 4'b1111;             // word
-    endcase
-  endfunction
-
-  logic [3:0] mem_mask;
-  assign mem_mask = byte_mask(mem_q.funct3[1:0], mem_q.addr[1:0]);
-
   assign data_req_o   = mem_q.valid && (mem_q.is_load || mem_q.is_store);
   assign data_we_o    = mem_q.is_store;
   assign data_addr_o  = {mem_q.addr[31:2], 2'b00};
-  assign data_be_o    = mem_mask;
-  // replicate the store data so each byte lane carries the right byte
-  always_comb begin
-    unique case (mem_q.funct3[1:0])
-      2'b00  : data_wdata_o = {4{mem_q.store_data[7:0]}};
-      2'b01  : data_wdata_o = {2{mem_q.store_data[15:0]}};
-      default: data_wdata_o = mem_q.store_data;
-    endcase
-  end
+  assign data_be_o    = mem_q.mem_be;
+  assign data_wdata_o = mem_q.mem_wdata;
 
-  // ---- MEM/WB register ----------------------------------------------------------------
-  logic [3:0]  wb_mask;
-  logic [31:0] wb_mem_wdata;
   always_ff @(posedge clk_i or negedge rst_ni) begin
-    if (!rst_ni) begin
-      wb_q         <= '0;
-      wb_mask      <= '0;
-      wb_mem_wdata <= '0;
-    end else begin
-      wb_q.valid      <= mem_q.valid;
-      wb_q.pc         <= mem_q.pc;
-      wb_q.instr      <= mem_q.instr;
-      wb_q.next_pc    <= mem_q.next_pc;
-      wb_q.trap       <= mem_q.trap;
-      wb_q.writes_rd  <= mem_q.writes_rd;
-      wb_q.rd         <= mem_q.rd;
-      wb_q.result     <= mem_q.result;
-      wb_q.is_load    <= mem_q.is_load;
-      wb_q.is_store   <= mem_q.is_store;
-      wb_q.funct3     <= mem_q.funct3;
-      wb_q.addr       <= mem_q.addr;
-      wb_q.store_data <= mem_q.store_data;
-      wb_q.rs1_addr   <= mem_q.rs1_addr;
-      wb_q.rs2_addr   <= mem_q.rs2_addr;
-      wb_q.rs1_val    <= mem_q.rs1_val;
-      wb_q.rs2_val    <= mem_q.rs2_val;
-      wb_mask         <= mem_mask;
-      wb_mem_wdata    <= data_wdata_o;
-    end
+    if (!rst_ni) wb_q <= '0;
+    else         wb_q <= mem_q;
   end
 
   // ===========================================================================
-  // WB — load data arrives, write the register file
+  // WB — load data arrives, write the register file, report to RVFI
   // ===========================================================================
-  logic [31:0] load_shifted, load_value;
-  assign load_shifted = data_rdata_i >> {wb_q.addr[1:0], 3'b000};
-  always_comb begin
-    unique case (wb_q.funct3)
-      3'b000 : load_value = {{24{load_shifted[7]}},  load_shifted[7:0]};   // LB
-      3'b001 : load_value = {{16{load_shifted[15]}}, load_shifted[15:0]};  // LH
-      3'b100 : load_value = {24'b0, load_shifted[7:0]};                     // LBU
-      3'b101 : load_value = {16'b0, load_shifted[15:0]};                    // LHU
-      default: load_value = load_shifted;                                   // LW
-    endcase
-  end
+  assign wb_result = wb_q.is_load ? lsu_load_value(wb_q.funct3, wb_q.addr[1:0], data_rdata_i)
+                                  : wb_q.result;
 
-  assign wb_result = wb_q.is_load ? load_value : wb_q.result;
-  assign rf_we     = wb_q.valid && wb_q.writes_rd;
-  assign rf_waddr  = wb_q.rd;
-  assign rf_wdata  = wb_result;
-
-  // ===========================================================================
-  // RVFI — report each retired instruction to the formal checkers
-  // ===========================================================================
-  logic [63:0] order_q;
-  always_ff @(posedge clk_i or negedge rst_ni) begin
-    if (!rst_ni)         order_q <= '0;
-    else if (wb_q.valid) order_q <= order_q + 64'd1;
-  end
-
-  assign rvfi_valid     = wb_q.valid;
-  assign rvfi_order     = order_q;
-  assign rvfi_insn      = wb_q.instr;
-  assign rvfi_trap      = wb_q.trap;
-  assign rvfi_halt      = 1'b0;
-  assign rvfi_intr      = 1'b0;
-  assign rvfi_mode      = 2'd3;          // machine mode
-  assign rvfi_ixl       = 2'd1;          // 32-bit
-  assign rvfi_rs1_addr  = wb_q.rs1_addr;
-  assign rvfi_rs2_addr  = wb_q.rs2_addr;
-  assign rvfi_rs1_rdata = wb_q.rs1_val;
-  assign rvfi_rs2_rdata = wb_q.rs2_val;
-  assign rvfi_rd_addr   = wb_q.writes_rd ? wb_q.rd : 5'd0;
-  assign rvfi_rd_wdata  = wb_q.writes_rd ? wb_result : 32'd0;
-  assign rvfi_pc_rdata  = wb_q.pc;
-  assign rvfi_pc_wdata  = wb_q.next_pc;
-  assign rvfi_mem_addr  = {wb_q.addr[31:2], 2'b00};
-  assign rvfi_mem_rmask = wb_q.is_load  ? wb_mask : 4'b0;
-  assign rvfi_mem_wmask = wb_q.is_store ? wb_mask : 4'b0;
-  assign rvfi_mem_rdata = data_rdata_i;
-  assign rvfi_mem_wdata = wb_q.is_store ? wb_mem_wdata : 32'd0;
+  rabbit_rvfi u_rvfi (
+    .clk_i, .rst_ni,
+    .retire_i(wb_q), .rd_wdata_i(wb_result), .mem_rdata_i(data_rdata_i),
+    .rvfi_valid, .rvfi_order, .rvfi_insn, .rvfi_trap, .rvfi_halt, .rvfi_intr,
+    .rvfi_mode, .rvfi_ixl, .rvfi_rs1_addr, .rvfi_rs2_addr, .rvfi_rs1_rdata,
+    .rvfi_rs2_rdata, .rvfi_rd_addr, .rvfi_rd_wdata, .rvfi_pc_rdata, .rvfi_pc_wdata,
+    .rvfi_mem_addr, .rvfi_mem_rmask, .rvfi_mem_wmask, .rvfi_mem_rdata, .rvfi_mem_wdata
+  );
 
   // ===========================================================================
   // Simulation-only check of rule R4 (the memory contract)
@@ -489,8 +272,8 @@ module rabbit5_core
   end
 `endif
 
-  // Inputs that v0 does not use (kept so the port list matches rabbit_cpu)
+  // Inputs that are not used (kept so the port list matches rabbit_cpu)
   logic unused;
-  assign unused = ^{instr_rvalid_i, data_rvalid_i, irq_i, wb_q.store_data};
+  assign unused = ^{instr_rvalid_i, data_rvalid_i, irq_i};
 
 endmodule

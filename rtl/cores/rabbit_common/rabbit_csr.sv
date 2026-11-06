@@ -1,5 +1,5 @@
 // =============================================================================
-// rabbit5_csr — machine-mode CSRs and trap state (v0: no interrupts)
+// rabbit_csr — machine-mode CSRs and trap state (v0: no interrupts)
 // =============================================================================
 // All CSR reads/writes and all trap bookkeeping happen for the instruction in
 // EX. EX is the "commit point": nothing after EX can trap, so an instruction
@@ -9,8 +9,8 @@
 // mscratch, mepc, mcause, mtval, mcycle[h], minstret[h], mhartid.
 // Any other address -> illegal instruction (reported back to EX).
 // =============================================================================
-module rabbit5_csr
-  import rabbit5_pkg::*;
+module rabbit_csr
+  import rabbit_pkg::*;
 #(
   parameter logic [31:0] MTVEC_RESET = 32'h0,
   parameter logic [31:0] HART_ID     = 32'h0
