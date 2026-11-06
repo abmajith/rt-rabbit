@@ -94,7 +94,7 @@ Things to verify yourself (good first exercises):
 | CSRs are not formally checked (riscv-formal `csrw`/`csrc_*` checks not enabled yet) | M2 |
 | BMC proves properties up to a depth (24 cycles timing, 12–20 riscv-formal), not unbounded | try `mode prove` (k-induction) once stable |
 | No C extension | not planned for the RT core (code size vs. fetch simplicity) |
-| An interrupt during a divide throws away up to 33 cycles of work | count it once per interrupt in WCET analysis |
+| A divide can be **starved** by frequent interrupts: each interrupt abandons it (up to 33 cycles lost) and it restarts after MRET; progress needs interrupts spaced more than ~34 cycles + handler time (see `../rabbit3/README.md`, M extension) | open choice: abort (now) / finish first / resume / abort once |
 | Register file not reset (x1..x31 start as X in gate-level sim) | fine for software that initialises registers |
 
 ## Ideas for your own properties (robotics / real time)

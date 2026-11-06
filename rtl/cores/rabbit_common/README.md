@@ -56,8 +56,10 @@ pipeline holds it there while `rabbit_execute.busy_o` is 1.
   control code needs the worst case to be the normal case.
 - **Interrupts** are not delayed by a divide: the divide is abandoned and runs
   again after MRET (the proven interrupt latency stays 4 / 7 cycles). The
-  price: an interrupt can throw away up to 33 cycles of divide work, which a
-  WCET analysis must count once per interrupt.
+  price: each interrupt that hits a divide throws away up to 33 cycles, and
+  interrupts that keep coming faster than ~34 cycles + handler time **starve**
+  the divide (no progress guarantee). See the known limitation in
+  `../rabbit3/README.md`.
 
 ### Why this design (measured on sky130, Yosys `synth -booth` + ABC, typical corner)
 

@@ -96,6 +96,19 @@ X: MUL/DIV arrives ──► rabbit_muldiv starts; busy_o = 1
   again from the start after MRET.
 - Not fetching during the wait saves 33 instruction-memory reads per divide.
 
+Known limitation: **a divide can be starved by frequent interrupts.** An
+interrupt abandons a running multiply/divide, which restarts from zero after
+MRET. What is proven: every interrupt is taken within the latency bound (any
+interrupt pattern), and a divide that sees no interrupt for 34 cycles takes
+exactly 34. What is *not* guaranteed: progress. If interrupts keep arriving
+more often than about 34 cycles + the handler's run time, the divide never
+completes. In a response-time analysis each interrupt that hits a divide costs
+up to 33 extra cycles, which needs a minimum spacing between interrupts as an
+assumption (a 1-10 kHz control loop at 50 MHz is far from the limit; counting
+encoder edges by interrupt would not be, so use the QEI peripheral). The
+alternatives are to finish the divide first (CV32E40P: progress guaranteed,
+latency +33 cycles), resume it, or abort only once; the choice is open.
+
 ## What is shared, what is not
 
 | | Shared (`rabbit_common`) | rabbit3 only |
