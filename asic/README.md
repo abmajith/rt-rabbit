@@ -1,4 +1,7 @@
-# asic — open silicon (planned)
+# asic — open silicon
+
+- `orfs/`: place and route of every core with OpenROAD (real timing, area,
+  power on sky130 / IHP SG13G2). See `orfs/README.md`.
 
 - Y1 H2: first Tiny Tapeout tile on IHP 130 nm (a peripheral or small core) to
   learn LibreLane end to end.

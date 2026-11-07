@@ -22,7 +22,7 @@ SIM_BUILD      ?= sim_build_$(CORE)
 # GLS=1 replaces the core RTL by its gate-level netlist (see `make gls-netlist`).
 VERILOG_SOURCES =
 ifeq ($(GLS),1)
-NETLIST    := $(REPO)/build/gls/$(CORE)/rabbit_cpu_netlist.v
+NETLIST    ?= $(REPO)/build/gls/$(CORE)/rabbit_cpu_netlist.v
 EXTRA_ARGS += $(NETLIST) -Wno-fatal -DRABBIT_GLS
 SIM_BUILD   = sim_build_$(CORE)_gls
 else
@@ -36,6 +36,8 @@ EXTRA_ARGS += --trace-fst --trace-structs
 SIM_ARGS   += --trace
 SIM_BUILD   = sim_build_$(CORE)_waves
 endif
+# extra Verilator options, e.g. --trace-underscore for the energy flow (asic/orfs/energy.sh)
+EXTRA_ARGS += $(VERILATOR_EXTRA)
 PLUSARGS   += +firmware=$(FIRMWARE)
 
 # The sources are passed with -f, which cocotb cannot see: list them as
