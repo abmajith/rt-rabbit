@@ -8,6 +8,7 @@ routed design with extracted wire parasitics.
 ```bash
 asic/orfs/run.sh rabbit5                 # sky130hd, 8 ns target, ~11 min
 asic/orfs/run.sh ibex ihp-sg13g2 8       # other PDK / period
+asic/orfs/energy.sh rabbit5 hello        # energy of a program on the routed core, ~15 min
 ```
 
 Needs Docker; the image `openroad/orfs` is pinned by digest in `run.sh` (about
@@ -54,4 +55,33 @@ area without aggressive timing repair (its Fmax numbers mean nothing):
 | rabbit5 | 149 933 | 17.3 mW |
 | CV32E40P | 201 990 | 17.0 mW |
 - Power printed by `summary.py` is *vectorless* (default switching activity),
-  a placeholder until activity from a gate-level simulation is used.
+  a placeholder; the real numbers come from `energy.sh` below.
+
+## Energy (real switching activity, `energy.sh`)
+
+`energy.sh` rebuilds every sky130 cell of the routed netlist from its logic
+function in the cell library (Yosys `read_liberty`), runs the program on it in
+the normal SoC testbench (it must still PASS: a post-layout functional check),
+records every wire, and lets OpenSTA compute power from that activity with
+the layout's wire capacitances. All pins get their activity from the
+simulation (only antenna diodes, which have no logic, do not).
+
+`hello`, sky130hd typical corner, 100 MHz, routed at 8 ns (2026-11-07):
+
+| Core | cycles | power | energy | per cycle | registers / logic / clock tree |
+|---|---|---|---|---|---|
+| rabbit3 | 2758 | 22.5 mW | **621 nJ** | 225 pJ | 7.4 / 8.0 / 7.1 mW |
+| rabbit5 | 3473 | 23.7 mW | 823 nJ | 237 pJ | 8.9 / 6.2 / 8.6 mW |
+| Ibex (small) | 3984 | 22.1 mW | 881 nJ | 221 pJ | 8.1 / 5.5 / 8.6 mW |
+| CV32E40P | 3447 | 26.7 mW | 920 nJ | 267 pJ | 9.0 / 7.3 / 10.5 mW |
+| CVE2 | 3984 | 23.3 mW | 928 nJ | 233 pJ | 8.0 / 6.5 / 8.9 mW |
+
+What it does and does not say:
+- Per cycle all five cores cost about the same (221-267 pJ); rabbit3 uses the
+  least energy for the program because it needs the fewest cycles.
+- About two thirds of every core's power is the clock tree plus the
+  flip-flops, clocked every cycle whether their value changes or not. Clock
+  gating of the register file and pipeline registers is the obvious lever.
+- The memories are NOT included (the SoC RAM is a simulation model). A real
+  chip spends a lot on SRAM reads; cores that fetch less gain more there.
+- One small program is not a benchmark; a control-loop workload is next.
