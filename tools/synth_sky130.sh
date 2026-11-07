@@ -32,16 +32,7 @@ CORES=${*:-rabbit3 rabbit5 cv32e40p cve2 ibex}
 
 printf '%-10s %14s %12s %12s\n' core "area um2" "of it flops" "delay ns"
 for c in $CORES; do
-  # files.f: drop comments, expand ${REPO}, turn +incdir+ into -I
-  SRC=$(grep -v '^//' "rtl/cores/$c/files.f" | sed "s|\${REPO}|$REPO|" | sed 's|^+incdir+|-I |' | tr '\n' ' ')
-  if [ "$c" = ibex ]; then
-    # slang cannot elaborate a module-level variable whose initializer reads
-    # nets (ibex_top.sv, a lint-only "unused" signal). Synthesize a copy where
-    # it is a plain assign; the vendor file itself is not touched.
-    sed 's/logic unused_scramble_inputs = /logic unused_scramble_inputs; assign unused_scramble_inputs = /' \
-        third_party/ibex/rtl/ibex_top.sv > "$OUT/ibex_top.sv"
-    SRC=${SRC//$REPO\/third_party\/ibex\/rtl\/ibex_top.sv/$REPO/$OUT/ibex_top.sv}
-  fi
+  SRC=$(tools/core_sources.sh "$c" "$OUT/src_$c")
   yosys -p "read_slang $SRC --top rabbit_cpu -DSYNTHESIS; \
             synth -top rabbit_cpu -booth -flatten; \
             dfflibmap -liberty $LIB; \
