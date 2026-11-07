@@ -1,4 +1,5 @@
-# Formal verification of a rabbit core:  make CORE=rabbit3   (default rabbit5)
+# Formal verification of a rabbit configuration (configs/):
+#   make CONFIG=rabbit3_rv32i   (default rabbit5; CORE=rabbit3 = CONFIG=rabbit3)
 #   make                 riscv-formal checks + timing properties + muldiv
 #   make riscv-formal    only riscv-formal (parallel)
 #   make timing          only the timing properties (timing/rabbit_timing_tb.sv)
@@ -6,16 +7,20 @@
 #   make muldiv-sim      ... its exhaustive 8-bit simulation part
 #   make check C=insn_add_ch0   one riscv-formal check
 REPO   ?= $(abspath ../../..)
-CORE   ?= rabbit5
+CONFIG ?= $(if $(CORE),$(CORE),rabbit5)
 JOBS   ?= $(shell nproc)
 RF_SRC := $(REPO)/third_party/riscv-formal
 
-include $(REPO)/rtl/cores/$(CORE)/core.mk
+include $(REPO)/mk/config.mk
+ifeq ($(filter rabbit%,$(CORE)),)
+$(error formal: CONFIG=$(CONFIG) uses $(CORE); these proofs are for the rabbit cores)
+endif
+HAS_M := $(filter 1,$(RV32M))
 
 # all SystemVerilog sources of the core except the rabbit_cpu adapter
 SOURCES := $(shell grep -v '^//' $(REPO)/rtl/cores/$(CORE)/files.f | grep -v rabbit_cpu.sv | sed 's|$${REPO}|$(REPO)|')
 
-BUILD    := build/$(CORE)
+BUILD    := build/$(CONFIG)
 FLAT     := $(BUILD)/core_flat.v
 # genchecks.py expects <riscv-formal>/cores/<core>/, so build a small mirror
 MIRROR   := $(BUILD)/riscv-formal
@@ -37,14 +42,14 @@ generate: $(CORE_DIR)/checks/makefile
 # built-in parser, so convert once with the slang frontend.
 # M extension: riscv-formal checks MUL/DIV with stand-in results (ALTOPS) and
 # a short divider (FORMAL_DIV_STEPS); the real arithmetic is the muldiv proof.
-FORMAL_DEFINES := -DSYNTHESIS -DRISCV_FORMAL_ALTOPS -DRABBIT_DIV_STEPS=$(FORMAL_DIV_STEPS)
-$(FLAT): $(SOURCES) $(REPO)/rtl/cores/$(CORE)/core.mk
+FORMAL_DEFINES := -DSYNTHESIS -DRISCV_FORMAL_ALTOPS -DRABBIT_DIV_STEPS=$(FORMAL_DIV_STEPS) $(CONFIG_DEFINES)
+$(FLAT): $(SOURCES) $(CONFIG_DEPS)
 	@mkdir -p $(BUILD)
 	yosys $(YOSYS_SLANG) -q -p "read_slang $(SOURCES) --top $(CORE)_core $(FORMAL_DEFINES); \
 	             hierarchy -top $(CORE)_core; proc; flatten; opt_clean; \
 	             write_verilog -noattr $@"
 
-$(CORE_DIR)/checks/makefile: $(FLAT) checks.cfg wrapper.sv $(REPO)/rtl/cores/$(CORE)/core.mk
+$(CORE_DIR)/checks/makefile: $(FLAT) checks.cfg wrapper.sv $(CONFIG_DEPS)
 	@mkdir -p $(MIRROR) $(CORE_DIR)
 	ln -sfn $(RF_SRC)/checks $(MIRROR)/checks
 	ln -sfn $(RF_SRC)/insns  $(MIRROR)/insns
@@ -52,6 +57,8 @@ $(CORE_DIR)/checks/makefile: $(FLAT) checks.cfg wrapper.sv $(REPO)/rtl/cores/$(C
 	sed -e 's/@RABBIT_CORE@/$(CORE)_core/' \
 	    -e 's/@LIVENESS_DEPTH@/$(FORMAL_LIVENESS_DEPTH)/' \
 	    -e 's/@RABBIT_IRQ_DEFINE@/$(if $(filter-out 0,$(TIMING_IRQ_LATENCY)),`define RABBIT_HAS_IRQ)/' \
+	    -e 's/@RABBIT_M_DEFINE@/$(if $(HAS_M),`define RABBIT_HAS_M)/' \
+	    -e 's/@ISA@/$(CONFIG_ISA)/' \
 	    checks.cfg > $(CORE_DIR)/checks.cfg
 	rm -rf $(CORE_DIR)/checks
 	cd $(CORE_DIR) && python3 ../../checks/genchecks.py
@@ -70,12 +77,13 @@ TIMING_DEFINES := -DSYNTHESIS -DRISCV_FORMAL_ALTOPS -DRABBIT_CORE=$(CORE)_core \
                   -DIRQ_LATENCY=$(TIMING_IRQ_LATENCY) \
                   -DCOMMIT_TO_RETIRE=$(TIMING_COMMIT_TO_RETIRE) \
                   -DMUL_CYCLES=$(TIMING_MUL_CYCLES) \
-                  -DRABBIT_DIV_STEPS=$(FORMAL_DIV_STEPS)
+                  -DRABBIT_DIV_STEPS=$(FORMAL_DIV_STEPS) \
+                  $(CONFIG_DEFINES) $(if $(HAS_M),-DRABBIT_HAS_M)
 
 timing: $(BUILD)/timing.sby
 	cd $(BUILD) && sby -f timing.sby
 
-$(BUILD)/timing.sby: timing/timing.sby.in timing/rabbit_timing_tb.sv $(SOURCES) $(REPO)/rtl/cores/$(CORE)/core.mk
+$(BUILD)/timing.sby: timing/timing.sby.in timing/rabbit_timing_tb.sv $(SOURCES) $(CONFIG_DEPS)
 	@mkdir -p $(BUILD)
 	@if [ -n "$(YOSYS_SLANG)" ]; then echo "plugin -i slang" > $(BUILD)/slang_load.ys; \
 	 else echo "# slang is built in" > $(BUILD)/slang_load.ys; fi

@@ -32,7 +32,7 @@ make ci          # lint + SoC firmware sim + 10 hw_ip tests + rma_analysis examp
 | 7 | `dv/cocotb/soc/test_soc.py` | Testbench: clock, reset, console capture, pass/fail |
 
 ```bash
-make soc-sim                 # CORE=cv32e40p PROG=hello by default
+make soc-sim                 # CONFIG=cv32e40p PROG=hello by default (configs/)
 make soc-waves               # same, plus dv/cocotb/soc/dump.fst
 gtkwave dv/cocotb/soc/dump.fst   # or: surfer dump.fst
 ```

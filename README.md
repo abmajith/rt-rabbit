@@ -18,6 +18,8 @@ git clone --recursive git@github.com:abmajith/rt-rabbit.git && cd rt-rabbit
 uv sync
 make soc-sim                 # run sw/baremetal/hello on CV32E40P in Verilator
 make soc-sim CORE=rabbit5    # ... on our own core (also rabbit3; PROG=irq, PROG=muldiv)
+make configs                 # list the SoC configurations (configs/): core + options
+make soc-sim CONFIG=rabbit5_rv32i PROG=muldiv   # rabbit5 without M: MUL/DIV must trap
 make formal                  # riscv-formal + timing + muldiv proofs for rabbit5 (~25 min)
 make gls-smoke CORE=rabbit5  # same firmware on the synthesized gate netlist
 make ci                      # lint + simulation tests

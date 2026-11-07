@@ -25,6 +25,7 @@
 module rabbit_csr
   import rabbit_pkg::*;
 #(
+  parameter rabbit_cfg_t CFG         = RABBIT_CFG,
   parameter logic [31:0] MTVEC_RESET = 32'h0,
   parameter logic [31:0] HART_ID     = 32'h0
 ) (
@@ -79,7 +80,7 @@ module rabbit_csr
     csr_rdata_o = 32'b0;
     unique case (csr_addr_i)
       CSR_MSTATUS  : csr_rdata_o = {19'b0, 2'b11, 3'b0, mstatus_mpie_q, 3'b0, mstatus_mie_q, 3'b0};
-      CSR_MISA     : csr_rdata_o = MISA_VALUE;
+      CSR_MISA     : csr_rdata_o = misa_value(CFG);
       CSR_MIE      : csr_rdata_o = mie_q;
       CSR_MIP      : csr_rdata_o = mip;
       CSR_MTVEC    : csr_rdata_o = mtvec_q;

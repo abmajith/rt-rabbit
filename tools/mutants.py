@@ -37,7 +37,7 @@ def sby(task):
 def rvf(core, check):
     """One riscv-formal check; the verdict is read from its status file."""
     return {
-        "cmd": ["make", f"CORE={core}", "check", f"C={check}"],
+        "cmd": ["make", f"CONFIG={core}", "check", f"C={check}"],
         "cwd": "dv/formal/rabbit",
         "status": f"dv/formal/rabbit/build/{core}/riscv-formal/cores/{core}/checks/{check}/status",
     }
@@ -91,6 +91,8 @@ def make_copy(name):
                      if (n == "muldiv" or n.startswith("muldiv_")) and (Path(folder) / n).is_dir()}
         return skip
     shutil.copytree(REPO / "rtl", dst / "rtl", ignore=ignore)
+    shutil.copytree(REPO / "configs", dst / "configs")
+    shutil.copytree(REPO / "mk", dst / "mk")
     shutil.copytree(REPO / "dv" / "formal" / "rabbit", dst / "dv" / "formal" / "rabbit", ignore=ignore)
     (dst / "third_party").mkdir()
     (dst / "third_party" / "riscv-formal").symlink_to(REPO / "third_party" / "riscv-formal")

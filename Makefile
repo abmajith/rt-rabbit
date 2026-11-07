@@ -1,18 +1,24 @@
 # rt-rabbit top-level entry points. Everything runs inside the uv environment.
 #
 #   make help           list targets
-#   make soc-sim        run firmware PROG on the SoC with CORE (default cv32e40p/hello)
+#   make configs        list the SoC configurations (configs/*.mk)
+#   make soc-sim        run firmware PROG on the SoC CONFIG (default cv32e40p, hello)
+#   make soc-waves      the same, and write a waveform (dump.fst)
+#   make lint           Verilator lint of the SoC CONFIG
+#   make formal         riscv-formal + timing properties (rabbit configurations)
+#   make gls-smoke      synthesize CONFIG with Yosys, run firmware PROG on the netlist
 #   make ip-test        run every hw_ip cocotb unit/integration test
-#   make lint           Verilator lint of the SoC
 #   make rma-smoke      run all rma_analysis example configs
-#   make formal         riscv-formal + timing properties (CORE=rabbit3|rabbit5)
-#   make gls-smoke      synthesize the core with Yosys, run firmware on the netlist
-#   make ci             everything CI runs
+#   make ci             everything CI runs (for the selected CONFIG)
 #   make check-all      reproduce all rabbit checks (STAGES="quick gls formal synth mutants")
+#
+# CONFIG=<name> selects configs/<name>.mk; CORE=<core> is short for that core's
+# default configuration (see configs/README.md).
 REPO := $(abspath .)
 export REPO
-CORE ?= cv32e40p
 PROG ?= hello
+
+include mk/config.mk
 
 # hw_ip/sim targets known to pass on main. telemetry_rf and top need
 # rf_packet_framer_buffer.v, which is not on main yet (see docs/STATUS.md).
@@ -23,19 +29,26 @@ IP_TARGETS := pwm_unit qei_unit telemetry_rx telemetry_tx wb_telemetry rf_cdc \
 RMA_XFAIL := fifo_same_priority_interference.yaml
 
 help:
-	@sed -n '2,11p' Makefile | sed 's/^# //'
+	@sed -n '2,16p' Makefile | sed 's/^# \{0,1\}//'
+
+configs:
+	@for f in configs/*.mk; do printf '%-16s %s\n' "$$(basename $$f .mk)" "$$(head -1 $$f | sed 's/^# //')"; done
+
+# For shell scripts (tools/, asic/): eval "$(make -s config-vars CONFIG=...)"
+config-vars:
+	@echo "CONFIG='$(CONFIG)' CORE='$(CORE)' CONFIG_ISA='$(CONFIG_ISA)' CONFIG_DEFINES='$(CONFIG_DEFINES)'"
 
 sync:
 	uv sync
 
 firmware:
-	$(MAKE) -C sw/baremetal PROG=$(PROG) CORE=$(CORE)
+	$(MAKE) -C sw/baremetal PROG=$(PROG) CONFIG=$(CONFIG)
 
 soc-sim: sync
-	cd dv/cocotb/soc && uv run $(MAKE) CORE=$(CORE) PROG=$(PROG)
+	cd dv/cocotb/soc && uv run $(MAKE) CONFIG=$(CONFIG) PROG=$(PROG)
 
 soc-waves: sync
-	cd dv/cocotb/soc && uv run $(MAKE) CORE=$(CORE) PROG=$(PROG) WAVES=1
+	cd dv/cocotb/soc && uv run $(MAKE) CONFIG=$(CONFIG) PROG=$(PROG) WAVES=1
 	@echo "waveform: dv/cocotb/soc/dump.fst  (open with gtkwave or surfer)"
 
 ip-test: sync
@@ -44,16 +57,14 @@ ip-test: sync
 	  (cd hw_ip/sim && uv run $(MAKE) clean >/dev/null && uv run $(MAKE) TARGET=$$t) ; \
 	done
 
+LINT_FLAGS := --lint-only --top-module rabbit_soc_sim \
+              -f rtl/cores/$(CORE)/files.f -f rtl/soc/files.f $(CORE_VERILATOR_FLAGS) $(CONFIG_DEFINES)
 lint:
-	verilator --lint-only --top-module rabbit_soc_sim \
-	  -f rtl/cores/$(CORE)/files.f -f rtl/soc/files.f \
-	  $$(sed -n 's/^CORE_VERILATOR_FLAGS *:= *//p' rtl/cores/$(CORE)/core.mk)
+	verilator $(LINT_FLAGS)
 	@# Strict (-Wall) check, but only fail on warnings in *our* RTL, not vendor cores.
-	@! verilator --lint-only -Wall -Wno-fatal -Wno-UNUSEDSIGNAL -Wno-PINCONNECTEMPTY \
-	  --top-module rabbit_soc_sim -f rtl/cores/$(CORE)/files.f -f rtl/soc/files.f \
-	  $$(sed -n 's/^CORE_VERILATOR_FLAGS *:= *//p' rtl/cores/$(CORE)/core.mk) \
+	@! verilator $(LINT_FLAGS) -Wall -Wno-fatal -Wno-UNUSEDSIGNAL -Wno-PINCONNECTEMPTY \
 	  2>&1 | grep -E '%(Warning|Error)[^:]*: [^ ]*rtl/(soc|cores)/'
-	@echo "lint: own RTL clean"
+	@echo "lint: own RTL clean ($(CONFIG))"
 
 rma-smoke: sync
 	@set -e; for f in rma_analysis/examples/*.yaml; do \
@@ -61,31 +72,32 @@ rma-smoke: sync
 	  uv run rma_analysis $$f >/dev/null && echo "ok    $$f"; \
 	done
 
-# ---- formal (rabbit5) ---------------------------------------------------------
-# formal works on our own cores; with the default CORE (cv32e40p) it runs rabbit5
-FORMAL_CORE := $(if $(filter rabbit%,$(CORE)),$(CORE),rabbit5)
+# ---- formal ---------------------------------------------------------------------
+# formal works on our own cores; with a reference core CONFIG it runs rabbit5
+FORMAL_CONFIG := $(if $(filter rabbit%,$(CORE)),$(CONFIG),rabbit5)
 formal:
-	$(MAKE) -C dv/formal/rabbit CORE=$(FORMAL_CORE)
+	$(MAKE) -C dv/formal/rabbit CONFIG=$(FORMAL_CONFIG)
 
 # ---- gate-level smoke test: generic Yosys gates, zero delay ----------------------
 # Catches RTL that simulates differently from what synthesizes (latches, X,
 # initial values, simulation-only constructs) long before a real PDK flow.
-GLS_DIR := build/gls/$(CORE)
+# The configuration is baked into the netlist.
+GLS_DIR := build/gls/$(CONFIG)
 YOSYS_SLANG := $(shell yosys -p 'help read_slang' >/dev/null 2>&1 || echo -m slang)
 gls-netlist: $(GLS_DIR)/rabbit_cpu_netlist.v
 # every file in the core's files.f (incl. rabbit_common), not just rtl/cores/$(CORE)/
 GLS_SOURCES := $(shell grep -v '^//' rtl/cores/$(CORE)/files.f | sed 's|$${REPO}|$(REPO)|')
-$(GLS_DIR)/rabbit_cpu_netlist.v: $(GLS_SOURCES) rtl/cores/$(CORE)/files.f
+$(GLS_DIR)/rabbit_cpu_netlist.v: $(GLS_SOURCES) rtl/cores/$(CORE)/files.f $(CONFIG_DEPS)
 	@mkdir -p $(GLS_DIR)
 	yosys $(YOSYS_SLANG) -q -l $(GLS_DIR)/synth.log -p "read_slang \
 	    $$(grep -v '^//' rtl/cores/$(CORE)/files.f | sed 's|$${REPO}|$(REPO)|' | tr '\n' ' ') \
-	    --top rabbit_cpu -DSYNTHESIS; \
+	    --top rabbit_cpu -DSYNTHESIS $(CONFIG_DEFINES); \
 	  synth -top rabbit_cpu -flatten; tee -o $(GLS_DIR)/stat.txt stat; \
 	  write_verilog -noattr $@"
 	@grep -E '^ +[0-9]+ +cells' $(GLS_DIR)/stat.txt | head -1
 
 gls-smoke: sync gls-netlist
-	cd dv/cocotb/soc && uv run $(MAKE) CORE=$(CORE) PROG=$(PROG) GLS=1
+	cd dv/cocotb/soc && uv run $(MAKE) CONFIG=$(CONFIG) PROG=$(PROG) GLS=1
 
 ci: lint soc-sim ip-test rma-smoke
 
@@ -100,4 +112,5 @@ clean:
 	rm -rf build dv/formal/rabbit/build
 	cd hw_ip/sim && uv run $(MAKE) clean
 
-.PHONY: help sync firmware soc-sim soc-waves ip-test lint rma-smoke formal gls-netlist gls-smoke ci check-all clean
+.PHONY: help configs config-vars sync firmware soc-sim soc-waves ip-test lint rma-smoke formal \
+        gls-netlist gls-smoke ci check-all clean

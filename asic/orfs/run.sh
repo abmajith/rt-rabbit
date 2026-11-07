@@ -1,40 +1,42 @@
 #!/usr/bin/env bash
-# Place-and-route one core with OpenROAD-flow-scripts (Docker image), then
-# report the real longest path (with wires), area and power.
+# Place-and-route one SoC configuration's core with OpenROAD-flow-scripts
+# (Docker image), then report the real longest path (with wires), area and power.
 #
-#   asic/orfs/run.sh <core> [platform] [clock period ns]
+#   asic/orfs/run.sh <config> [platform] [clock period ns]
 #   asic/orfs/run.sh rabbit3                      # sky130hd, 8 ns
+#   asic/orfs/run.sh rabbit5_rv32i                # any file in configs/
 #   asic/orfs/run.sh ibex ihp-sg13g2 8
 #
 # Steps:
-#  1. our Yosys + slang turns the core (rtl/cores/<core>/files.f) into one
-#     plain Verilog file - the same front end for every core;
+#  1. our Yosys + slang turns the core (rtl/cores/<core>/files.f, with the
+#     configuration's defines) into one plain Verilog file - the same front
+#     end for every core;
 #  2. ORFS (inside openroad/orfs, pinned below) runs synthesis, floorplan,
 #     placement, clock tree, routing;
 #  3. the summary line comes from ORFS' final reports.
-# Output: build/orfs/<platform>/<core>_<period>ns/ (logs/, reports/, results/)
+# Output: build/orfs/<platform>/<config>_<period>ns/ (logs/, reports/, results/)
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
-CORE=${1:?usage: asic/orfs/run.sh <core> [platform] [period ns]}
+CONFIG=${1:?usage: asic/orfs/run.sh <config> [platform] [period ns]}
 PLATFORM=${2:-sky130hd}
 PERIOD=${3:-8.0}
 IMAGE=${ORFS_IMAGE:-openroad/orfs@sha256:8b4f3942318d740ea1f73f4f895bbac150b32e41eb3b7baf7722adec6538bbcf}
 
-WORK=$REPO/build/orfs/$PLATFORM/${CORE}_${PERIOD}ns
+WORK=$REPO/build/orfs/$PLATFORM/${CONFIG}_${PERIOD}ns
 mkdir -p "$WORK/src"
 
 # 1. one plain Verilog file
-SRC=$("$REPO/tools/core_sources.sh" "$CORE" "$WORK/src/patched")
+SRC=$("$REPO/tools/core_sources.sh" "$CONFIG" "$WORK/src/patched")
 yosys -q -l "$WORK/src/frontend.log" -p "read_slang $SRC --top rabbit_cpu -DSYNTHESIS; \
           hierarchy -top rabbit_cpu; proc; opt_clean; bmuxmap; bwmuxmap; demuxmap; \
-          write_verilog -noattr $WORK/src/$CORE.v"
+          write_verilog -noattr $WORK/src/$CONFIG.v"
 
 # 2. ORFS design configuration
 cat > "$WORK/config.mk" <<EOF
 export PLATFORM        = $PLATFORM
 export DESIGN_NAME     = rabbit_cpu
-export DESIGN_NICKNAME = $CORE
-export VERILOG_FILES   = $WORK/src/$CORE.v
+export DESIGN_NICKNAME = $CONFIG
+export VERILOG_FILES   = $WORK/src/$CONFIG.v
 export SDC_FILE        = $REPO/asic/orfs/constraint.sdc
 export CLOCK_PERIOD    = $PERIOD
 # moderate density: the same for every core
@@ -45,7 +47,7 @@ EOF
 docker run --rm -u "$(id -u):$(id -g)" -v "$REPO:$REPO" -e CLOCK_PERIOD="$PERIOD" "$IMAGE" bash -c "
   cd /OpenROAD-flow-scripts && source env.sh > /dev/null 2>&1
   make -C flow DESIGN_CONFIG=$WORK/config.mk WORK_HOME=$WORK
-" > "$WORK/flow.log" 2>&1 || { echo "$CORE: flow failed, see $WORK/flow.log"; tail -20 "$WORK/flow.log"; exit 1; }
+" > "$WORK/flow.log" 2>&1 || { echo "$CONFIG: flow failed, see $WORK/flow.log"; tail -20 "$WORK/flow.log"; exit 1; }
 
 # 3. summary
-"$REPO/asic/orfs/summary.py" "$WORK" "$CORE" "$PERIOD" "$PLATFORM"
+"$REPO/asic/orfs/summary.py" "$WORK" "$CONFIG" "$PERIOD" "$PLATFORM"

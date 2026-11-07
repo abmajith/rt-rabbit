@@ -12,6 +12,7 @@
 | Interrupt self-test on CV32E40P (reference) | `make soc-sim PROG=irq` | PASS, 9095 cycles |
 | Reference cores CVE2 and Ibex (pinned submodules, same firmware) | `make soc-sim CORE=cve2\|ibex PROG=...` | hello / irq / muldiv PASS; comparison table in `rtl/cores/README.md` |
 | Reproduce everything | `tools/check_all.sh [quick gls formal synth mutants]` | all PASS (2026-11-07) |
+| SoC configurations (`configs/`, `make configs`): core + options, one name per variant | `make <target> CONFIG=rabbit5_rv32i` | 7 configurations; quick, gls, formal all PASS (2026-11-07) |
 
 ## Own cores: rabbit3 and rabbit5 (shared blocks in rtl/cores/rabbit_common)
 
@@ -27,6 +28,9 @@
 | interrupt properties I1–I4, sleep W0–W2; worst-case latency (tight) | PASS, 4 cycles | PASS, 7 cycles |
 | gate-level smoke (`make gls-smoke CORE=...`) | PASS, same cycles (hello, irq, muldiv) | PASS, same cycles (hello, irq, muldiv) |
 | size, sky130 (`synth -booth` + ABC; CV32E40P RV32IMC: 170.3 k µm²) | 114.9 k µm² | 126.5 k µm² |
+| without M (`CONFIG=rabbit3_rv32i` / `rabbit5_rv32i`): size | 81.1 k µm² (−29 %) | 95.2 k µm² (−25 %) |
+| without M: riscv-formal / timing + X1 (MUL/DIV trap) / gate level | 45/45 / PASS / PASS | 45/45 / PASS / PASS |
+| without M: hello / muldiv (software multiply via libgcc) | 3147 / 62 724 cycles | 3960 / 75 013 cycles |
 
 Next: int8 (and int4) SIMD dot product for quantized inference, riscv-formal
 CSR checks, RISCOF compliance, then the dual-core TDM work (M4).

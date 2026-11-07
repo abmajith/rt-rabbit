@@ -1,5 +1,5 @@
 // =============================================================================
-// rabbit3_core — 3-stage in-order RV32IM pipeline (single hart)
+// rabbit3_core — 3-stage in-order RV32I(M) pipeline (single hart)
 // =============================================================================
 // START HERE to learn the rabbit pipelines; then read rabbit5_core.sv.
 //
@@ -59,6 +59,7 @@
 module rabbit3_core
   import rabbit_pkg::*;
 #(
+  parameter rabbit_cfg_t CFG        = RABBIT_CFG,     // optional ISA parts (rabbit_pkg)
   parameter logic [31:0] BOOT_ADDR  = 32'h0000_0080,
   parameter logic [31:0] MTVEC_ADDR = 32'h0000_0000,
   parameter logic [31:0] HART_ID    = 32'h0000_0000
@@ -177,7 +178,7 @@ module rabbit3_core
   end
 
   decoded_t x_dec;
-  rabbit_decoder u_decoder (.instr_i(x_instr), .dec_o(x_dec));
+  rabbit_decoder #(.CFG(CFG)) u_decoder (.instr_i(x_instr), .dec_o(x_dec));
 
   // Register file: read in X, written in W. The write-first bypass inside
   // is this core's entire forwarding network. While X is held (R8), the
@@ -192,7 +193,7 @@ module rabbit3_core
   );
 
   exec_t x_res;
-  rabbit_execute #(.MTVEC_RESET(MTVEC_ADDR), .HART_ID(HART_ID)) u_execute (
+  rabbit_execute #(.CFG(CFG), .MTVEC_RESET(MTVEC_ADDR), .HART_ID(HART_ID)) u_execute (
     .clk_i, .rst_ni,
     .valid_i      (x_valid_q),
     .pc_i         (x_pc_q),

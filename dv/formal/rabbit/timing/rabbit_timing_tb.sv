@@ -18,6 +18,7 @@
 //   RABBIT_DIV_STEPS  divider steps in this proof; a DIV* spends
 //                  RABBIT_DIV_STEPS+2 cycles in the commit stage (see core.mk:
 //                  the proof uses 2 steps, the real 32 are proven in muldiv/)
+//   RABBIT_HAS_M   defined if the configuration has the M extension (RV32M = 1)
 //
 //   T1  exact timing model: the gap between two consecutive retirements is
 //         REDIRECT_GAP  if the earlier instruction changed control flow
@@ -50,7 +51,7 @@
 //       vector the core jumped to)
 //   I5  the handler starts at the right address: mtvec base (direct mode) or
 //       base + 4*line for a requested line (vectored mode)
-// M extension:
+// M extension (the covers of M1 and R8 only if RABBIT_HAS_M):
 //   M0  while an M instruction waits in the commit stage, its operand values
 //       do not change (rabbit_muldiv relies on it; white-box: looks inside
 //       rabbit_execute)
@@ -59,6 +60,8 @@
 //       it happens)
 //   M2  while an M instruction waits, no instruction is fetched (power: a
 //       divide costs no instruction-memory reads)
+//   X1  without the M extension: every MUL/DIV/REM encoding traps (illegal
+//       instruction) and writes nothing: the hardware is really absent
 // Sleep (WFI), for power:
 //   W0  the core only falls asleep when a WFI retires
 //   W1  it wakes in the cycle after an enabled interrupt becomes pending
@@ -174,6 +177,17 @@ module rabbit_timing_tb (
   int   m_extra;
   assign is_m    = (opcode == 7'b0110011) && (rvfi_insn[31:25] == 7'b0000001) && !rvfi_trap;
   assign m_extra = !is_m ? 0 : funct3[2] ? DIV_CYCLES - 1 : MUL_CYCLES - 1;
+
+`ifndef RABBIT_HAS_M
+  // X1: without M, the M encodings are illegal instructions
+  logic m_encoding;
+  assign m_encoding = (opcode == 7'b0110011) && (rvfi_insn[31:25] == 7'b0000001);
+  always_comb begin
+    if (rst_n && rvfi_valid && m_encoding)
+      assert (rvfi_trap && rvfi_rd_addr == 5'd0 && rvfi_mem_wmask == 4'd0);   // X1
+    if (rst_n && rvfi_valid && m_encoding) cover (!rvfi_intr);              // X1 happens
+  end
+`endif
 
   // CSR instructions (the ISA meaning: old value -> rd, then write)
   logic        is_csr, csr_writes;
@@ -421,7 +435,9 @@ module rabbit_timing_tb (
         cover (wait_cycles + D == IRQ_LATENCY && m_extra == 0);   // the bound is tight
         cover (wait_cycles + D == IRQ_LATENCY - 1);
         cover (slept);                            // WFI woken by the interrupt it takes
+`ifdef RABBIT_HAS_M
         cover (m_busy_seen);                      // M1: interrupt while an M op waited
+`endif
         cover (!m_tvec[0]);                       // direct mode is exercised too
         cover (m_tvec[0] && vec_line != 7);       // ... and a vector other than the timer's
       end
@@ -460,9 +476,11 @@ module rabbit_timing_tb (
       cover (gap == LOADUSE_GAP && load_use);
       cover (gap == REDIRECT_GAP);
       cover (gap == REDIRECT_GAP && rvfi_trap);
+`ifdef RABBIT_HAS_M
       cover (is_m && !funct3[2] && gap == MUL_CYCLES);       // R8: multiply
       cover (is_m &&  funct3[2] && gap == DIV_CYCLES);       // R8: divide
       cover (is_m && load_use);                              // R8 after load-use
+`endif
     end
   end
 endmodule

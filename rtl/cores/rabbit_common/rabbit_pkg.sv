@@ -9,6 +9,32 @@
 package rabbit_pkg;
 
   // ---------------------------------------------------------------------------
+  // Configuration: which optional parts of the ISA a core has.
+  //
+  // Every rabbit core takes one parameter CFG of this type and hands it to the
+  // blocks that need it. Its default, RABBIT_CFG, is set by the build:
+  //
+  //   configs/<name>.mk  (RV32M := 0)  ->  mk/config.mk  ->  -DRABBIT_RV32M=0
+  //
+  // These `RABBIT_* defines are read here and nowhere else in the RTL. A new
+  // option (C, F, vector, debug, ...) is one more field, one more define, and
+  // one more line in mk/config.mk (docs/dev: "adding a feature").
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    logic rv32m;   // M: MUL*, DIV*, REM* (rabbit_muldiv). 0: they trap as illegal
+  } rabbit_cfg_t;
+
+`ifndef RABBIT_RV32M
+`define RABBIT_RV32M 1
+`endif
+  localparam rabbit_cfg_t RABBIT_CFG = '{rv32m: (`RABBIT_RV32M != 0)};
+
+  // misa: MXL = 1 (32-bit), I always, M if configured
+  function automatic logic [31:0] misa_value(rabbit_cfg_t cfg);
+    return 32'h4000_0100 | (cfg.rv32m ? 32'h0000_1000 : 32'h0);
+  endfunction
+
+  // ---------------------------------------------------------------------------
   // RV32I major opcodes (instruction bits [6:0])
   // ---------------------------------------------------------------------------
   localparam logic [6:0] OPC_LOAD     = 7'b000_0011;
@@ -96,8 +122,7 @@ package rabbit_pkg;
   localparam logic [11:0] CSR_MINSTRETH= 12'hB82;
   localparam logic [11:0] CSR_MHARTID  = 12'hF14;
 
-  // misa: MXL=1 (32-bit), extensions I and M
-  localparam logic [31:0] MISA_VALUE = 32'h4000_1100;
+  // misa: see misa_value() at the top (depends on the configuration)
 
   // ---------------------------------------------------------------------------
   // Interrupts. Line i of irq_i is bit i of mip and mie (RISC-V standard

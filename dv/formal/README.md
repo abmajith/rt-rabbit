@@ -2,10 +2,12 @@
 
 ## rabbit cores (rabbit3, rabbit5)
 
-One flow for every rabbit core, selected with `CORE=`:
+One flow for every rabbit configuration (`configs/`), selected with
+`CONFIG=` (`CORE=rabbit3` is short for `CONFIG=rabbit3`):
 
 ```bash
 make formal CORE=rabbit3                       # from the repo root: everything below
+make formal CONFIG=rabbit3_rv32i               # the same core without M (proves MUL/DIV trap: X1)
 make -C dv/formal/rabbit CORE=rabbit5 riscv-formal
 make -C dv/formal/rabbit CORE=rabbit5 timing
 make -C dv/formal/rabbit muldiv                               # multiply/divide unit (any core)

@@ -1,11 +1,10 @@
-# Build a bare-metal program for the selected core.
-#   make PROG=hello            -> build/$(CORE)/hello/hello.{elf,hex,dis}
-#   make PROG=hello CORE=ibex  (once an ibex adapter exists)
+# Build a bare-metal program for one SoC configuration (configs/).
+#   make PROG=hello                       -> build/cv32e40p/hello/hello.{elf,hex,dis}
+#   make PROG=muldiv CONFIG=rabbit5_rv32i -> build/rabbit5_rv32i/muldiv/...
 REPO  ?= $(abspath ../..)
-CORE  ?= cv32e40p
 PROG  ?= hello
 
-include $(REPO)/rtl/cores/$(CORE)/core.mk
+include $(REPO)/mk/config.mk
 
 CROSS ?= riscv64-unknown-elf-
 CC     = $(CROSS)gcc
@@ -13,7 +12,7 @@ OBJCOPY= $(CROSS)objcopy
 OBJDUMP= $(CROSS)objdump
 
 COMMON = $(REPO)/sw/baremetal/common
-OUT    = build/$(CORE)/$(PROG)
+OUT    = build/$(CONFIG)/$(PROG)
 
 # CORE_CFLAGS (core.mk): defines that describe a core's documented deviations
 CFLAGS  = $(CORE_CFLAGS) -march=$(CORE_MARCH) -mabi=$(CORE_MABI) -O2 -g -Wall -Wextra \
@@ -24,7 +23,7 @@ SRCS = $(COMMON)/crt0.S $(wildcard $(PROG)/*.c) $(wildcard $(PROG)/*.S)
 
 all: $(OUT)/$(PROG).hex $(OUT)/$(PROG).dis
 
-$(OUT)/$(PROG).elf: $(SRCS) $(COMMON)/link.ld $(COMMON)/rabbit_sim.h $(REPO)/rtl/cores/$(CORE)/core.mk
+$(OUT)/$(PROG).elf: $(SRCS) $(COMMON)/link.ld $(COMMON)/rabbit_sim.h $(CONFIG_DEPS)
 	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) $(SRCS) -o $@ $(LDFLAGS)
 
