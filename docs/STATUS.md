@@ -8,7 +8,7 @@
 | Lint of our RTL (`-Wall`, vendor code excluded) | `make lint` | clean |
 | hw_ip cocotb tests | `make ip-test` | 10 targets, 19 tests pass |
 | rma_analysis examples | `make rma-smoke` | 11 run, 1 expected failure |
-| GitHub Actions | `.github/workflows/ci.yml` | lint, soc-sim matrix, ip-test matrix, rma-smoke, formal, GLS |
+| GitHub Actions | `.github/workflows/ci.yml` (every PR, ~1 min jobs) + `deep-verify.yml` (on demand) | ci: lint, soc-sim (5 cores), ip-test, rma-smoke, muldiv exhaustive; deep-verify: formal, GLS, mutants |
 | Interrupt self-test on CV32E40P (reference) | `make soc-sim PROG=irq` | PASS, 9095 cycles |
 | Reference cores CVE2 and Ibex (pinned submodules, same firmware) | `make soc-sim CORE=cve2\|ibex PROG=...` | hello / irq / muldiv PASS; comparison table in `rtl/cores/README.md` |
 | Reproduce everything | `tools/check_all.sh [quick gls formal synth mutants]` | all PASS (2026-11-07) |

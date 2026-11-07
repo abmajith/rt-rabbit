@@ -1,0 +1,103 @@
+name: deep-verify
+
+# Heavy verification, started by hand: GitHub -> Actions -> "deep-verify" ->
+# "Run workflow" (choose what), or locally with tools/check_all.sh.
+#   formal   riscv-formal + timing properties + muldiv unit proof, both rabbit cores (~10 min)
+#   gls      firmware on the gate-level netlists of rabbit3 / rabbit5 (~4 min)
+#   mutants  plant known bugs, check each is caught (~45 min)
+#   all      everything
+on:
+  workflow_dispatch:
+    inputs:
+      what:
+        description: "what to run"
+        type: choice
+        options: [all, formal, gls, mutants]
+        default: all
+
+concurrency:
+  group: deep-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # riscv-formal (53 checks, RV32IM) + timing properties + the multiply/divide
+  # unit proof (dv/formal/rabbit/muldiv), for each of our own cores.
+  formal:
+    if: ${{ inputs.what == 'all' || inputs.what == 'formal' }}
+    runs-on: ubuntu-24.04
+    # GitHub runners: ~7-10 min per core (2026-11-07)
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [rabbit3, rabbit5]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: YosysHQ/setup-oss-cad-suite@v3
+        with: { version: "2026-11-04" }     # pinned: yosys, sby, boolector
+      - run: yosys -V && sby --version
+      - run: make formal CORE=${{ matrix.core }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: formal-results-${{ matrix.core }}
+          path: |
+            dv/formal/rabbit/build/${{ matrix.core }}/riscv-formal/cores/${{ matrix.core }}/checks/*/logfile.txt
+            dv/formal/rabbit/build/${{ matrix.core }}/riscv-formal/cores/${{ matrix.core }}/checks/*/engine_0/*.vcd
+            dv/formal/rabbit/build/${{ matrix.core }}/timing_*/logfile.txt
+            dv/formal/rabbit/build/${{ matrix.core }}/timing_*/engine_0/*.vcd
+
+  # Gate-level smoke test: Yosys builds the netlist, the pinned Verilator image runs it.
+  gls-netlist:
+    if: ${{ inputs.what == 'all' || inputs.what == 'gls' }}
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        core: [rabbit3, rabbit5]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: YosysHQ/setup-oss-cad-suite@v3
+        with: { version: "2026-11-04" }
+      - run: make gls-netlist CORE=${{ matrix.core }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gls-netlist-${{ matrix.core }}
+          path: build/gls/${{ matrix.core }}
+
+  gls-smoke:
+    needs: gls-netlist
+    runs-on: ubuntu-24.04
+    container: { image: "verilator/verilator:v5.054", options: --entrypoint "" }
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [rabbit3, rabbit5]
+    steps:
+      - name: RISC-V GCC
+        run: apt-get update -q && apt-get install -y -q gcc-riscv64-unknown-elf libpython3.12-dev
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: gls-netlist-${{ matrix.core }}
+          path: build/gls/${{ matrix.core }}
+      - run: uv sync
+      - working-directory: dv/cocotb/soc
+        run: uv run make CORE=${{ matrix.core }} PROG=hello GLS=1
+      - working-directory: dv/cocotb/soc
+        run: uv run make CORE=${{ matrix.core }} PROG=irq GLS=1
+      - name: Run muldiv on the gate-level netlist
+        working-directory: dv/cocotb/soc
+        run: uv run make CORE=${{ matrix.core }} PROG=muldiv GLS=1
+
+  mutants:
+    if: ${{ inputs.what == 'all' || inputs.what == 'mutants' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: YosysHQ/setup-oss-cad-suite@v3
+        with: { version: "2026-11-04" }
+      - run: python3 tools/mutants.py --baseline

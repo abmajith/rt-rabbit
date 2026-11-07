@@ -35,7 +35,8 @@ Everything an instruction *does* lives here. A rabbit core
 Rules for this directory:
 - nothing here may know how many stages a core has;
 - a change here affects every core → run `make formal CORE=rabbit3` **and**
-  `make formal CORE=rabbit5` (CI does both).
+  `make formal CORE=rabbit5` (or `tools/check_all.sh formal`; on GitHub: the
+  on-demand `deep-verify` workflow).
 
 ## M extension (`rabbit_muldiv.sv`)
 
