@@ -8,7 +8,7 @@ import os
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles, RisingEdge
+from cocotb.triggers import ClockCycles, RisingEdge, Timer
 
 MAX_CYCLES = int(os.environ.get("RABBIT_MAX_CYCLES", "1000000"))
 
@@ -17,6 +17,12 @@ async def run_firmware(dut, max_cycles: int = MAX_CYCLES):
     """Reset the SoC, run until EXIT is written, return (exit_code, console, cycles)."""
     cocotb.start_soon(Clock(dut.clk_i, 10, unit="ns").start())
     dut.irq_i.value = 0
+    # Give rst_ni a real falling edge. Starting at 0 there is no negedge, so an
+    # asynchronous reset only acts at a clock edge - and a core that gates its
+    # own clock during reset (CVE2, Ibex) then never resets those registers in
+    # Verilator (silicon would: there the reset is level-sensitive).
+    dut.rst_ni.value = 1
+    await Timer(1, unit="ns")
     dut.rst_ni.value = 0
     await ClockCycles(dut.clk_i, 5)
     dut.rst_ni.value = 1

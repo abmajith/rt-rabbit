@@ -2,7 +2,7 @@
 # Reproduce every check of the rabbit cores on your own machine.
 #
 #   tools/check_all.sh                 quick + gls            (~10 min)
-#   tools/check_all.sh quick           lint, firmware on all cores, muldiv exhaustive sim  (~1 min)
+#   tools/check_all.sh quick           lint, firmware on all 5 cores, muldiv exhaustive sim (~2 min)
 #   tools/check_all.sh gls             firmware on the gate-level netlists                  (~10 min)
 #   tools/check_all.sh formal          riscv-formal + timing + muldiv proof, both cores     (~60 min)
 #   tools/check_all.sh synth           sky130 area / delay table (needs the sky130 PDK)     (~1 min)
@@ -51,7 +51,7 @@ for stage in $STAGES; do
   echo "=== $stage"
   case $stage in
     quick)
-      for c in rabbit3 rabbit5 cv32e40p; do
+      for c in rabbit3 rabbit5 cv32e40p cve2 ibex; do
         step "quick/lint-$c" "" make lint CORE=$c
         for p in hello irq muldiv; do
           step "quick/sim-$c-$p" "RESULT: PASS" make soc-sim CORE=$c PROG=$p

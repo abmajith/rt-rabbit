@@ -17,14 +17,14 @@ IF ──► ID ──► EX ──► MEM ──► WB
 
 | What | Result | Command |
 |---|---|---|
-| `hello` firmware in the SoC | PASS, 3471 cycles (RV32I: 3958; rabbit3: 2756, CV32E40P: 3450) | `make soc-sim CORE=rabbit5` |
+| `hello` firmware in the SoC | PASS, 3473 cycles (RV32I: 3958; rabbit3: 2758, CV32E40P: 3447) | `make soc-sim CORE=rabbit5` |
 | riscv-formal (45 instructions incl. M with ALTOPS + reg, pc_fwd, pc_bwd, causal, unique, liveness, ill, cover) | **53/53 PASS** | `make formal CORE=rabbit5` |
 | M extension: multiply 2 cycles, divide 34, for any operands (R8, T1); unit proof of the arithmetic | PASS | `make formal CORE=rabbit5` |
 | M self-test firmware (corner cases, random, timing, interrupt during divide) | PASS (same test on CV32E40P / rabbit3) | `make soc-sim CORE=rabbit5 PROG=muldiv` |
 | Timing properties T1–T4 (ours, beyond riscv-formal) | PASS (BMC depth 24) + all covers reached | `make formal CORE=rabbit5` |
 | Interrupts + WFI: properties I1–I4, W0–W2; latency ≤ **7 cycles** (tight) | PASS + all covers reached | `make formal CORE=rabbit5` |
 | Interrupt self-test firmware (same as on CV32E40P / rabbit3) | PASS, 9025 cycles | `make soc-sim CORE=rabbit5 PROG=irq` |
-| Gate-level smoke test (Yosys generic gates) | PASS, **same cycles** as RTL (hello 3471, irq 9025, muldiv) | `make gls-smoke CORE=rabbit5` |
+| Gate-level smoke test (Yosys generic gates) | PASS, **same cycles** as RTL (hello 3473, irq 9025, muldiv) | `make gls-smoke CORE=rabbit5` |
 | Verilator `-Wall` lint | clean | `make lint CORE=rabbit5` |
 | Size, sky130 (`synth -booth` + ABC, core + adapter) | 126.5 k µm² (RV32I: 95.4 k; CV32E40P: 170.3 k) | see `../rabbit_common/README.md` |
 

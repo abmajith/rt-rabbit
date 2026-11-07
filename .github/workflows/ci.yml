@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        core: [cv32e40p, rabbit3, rabbit5]
+        core: [cv32e40p, cve2, ibex, rabbit3, rabbit5]
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        core: [cv32e40p, rabbit3, rabbit5]
+        core: [cv32e40p, cve2, ibex, rabbit3, rabbit5]
         # irq: interrupt self-test; cv32e40p is the reference the rabbits must match
         prog: [hello, irq, muldiv]
     steps:

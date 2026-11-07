@@ -27,8 +27,8 @@ F ──► X ──────────────────────
 Then run both and look at the difference:
 
 ```bash
-make soc-sim   CORE=rabbit3            # hello: 2756 cycles
-make soc-sim   CORE=rabbit5            # hello: 3471 cycles
+make soc-sim   CORE=rabbit3            # hello: 2758 cycles
+make soc-sim   CORE=rabbit5            # hello: 3473 cycles
 make soc-sim   CORE=rabbit3 PROG=irq   # interrupt self-test (also rabbit5, cv32e40p)
 make soc-sim   CORE=rabbit3 PROG=muldiv  # M extension self-test + timing
 make soc-waves CORE=rabbit3            # waveform: dv/cocotb/soc/dump.fst
@@ -49,7 +49,7 @@ make gls-smoke CORE=rabbit3            # same firmware on the gate netlist
 | WFI sleep (`core_sleep_o` for clock gating) | yes, fetch restarts in the cycle the interrupt appears | same |
 | MUL, MULH, MULHSU, MULHU (R8) | **2 cycles** (1 extra), any operands | same |
 | DIV, DIVU, REM, REMU (R8) | **34 cycles** (33 extra), any operands; an interrupt abandons it | same |
-| `hello` (RV32IM) | 2756 cycles (RV32I: 3145) | 3471 cycles (RV32I: 3958) |
+| `hello` (RV32IM) | 2758 cycles (RV32I: 3145) | 3473 cycles (RV32I: 3958) |
 | Size, sky130 (`synth -booth`, incl. adapter) | 114.9 k µm² (RV32I: 81.1 k) | 126.5 k µm² (RV32I: 95.4 k) |
 | Longest combinational path (qualitative) | memory → load align → register bypass → ALU → data address | one stage of that |
 
