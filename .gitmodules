@@ -4,3 +4,9 @@
 [submodule "third_party/riscv-formal"]
 	path = third_party/riscv-formal
 	url = https://github.com/YosysHQ/riscv-formal.git
+[submodule "third_party/cve2"]
+	path = third_party/cve2
+	url = https://github.com/openhwgroup/cve2.git
+[submodule "third_party/ibex"]
+	path = third_party/ibex
+	url = https://github.com/lowRISC/ibex.git

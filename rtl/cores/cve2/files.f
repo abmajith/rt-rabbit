@@ -1,0 +1,31 @@
+// OpenHW CVE2 (third_party/cve2, pinned commit) + rabbit_cpu adapter.
+// From cve2's cv32e20_manifest.flist, without the tracer. ${REPO} is expanded by make.
++incdir+${REPO}/third_party/cve2/rtl
++incdir+${REPO}/third_party/cve2/shared/rtl
++incdir+${REPO}/third_party/cve2/vendor/lowrisc_ip/ip/prim/rtl
++incdir+${REPO}/third_party/cve2/vendor/lowrisc_ip/dv/sv/dv_utils
+${REPO}/third_party/cve2/rtl/cve2_pkg.sv
+${REPO}/third_party/cve2/vendor/lowrisc_ip/ip/prim/rtl/prim_secded_pkg.sv
+${REPO}/third_party/cve2/vendor/lowrisc_ip/ip/prim/rtl/prim_ram_1p_pkg.sv
+${REPO}/third_party/cve2/rtl/cve2_alu.sv
+${REPO}/third_party/cve2/rtl/cve2_compressed_decoder.sv
+${REPO}/third_party/cve2/rtl/cve2_controller.sv
+${REPO}/third_party/cve2/rtl/cve2_cs_registers.sv
+${REPO}/third_party/cve2/rtl/cve2_csr.sv
+${REPO}/third_party/cve2/rtl/cve2_counter.sv
+${REPO}/third_party/cve2/rtl/cve2_decoder.sv
+${REPO}/third_party/cve2/rtl/cve2_ex_block.sv
+${REPO}/third_party/cve2/rtl/cve2_fetch_fifo.sv
+${REPO}/third_party/cve2/rtl/cve2_id_stage.sv
+${REPO}/third_party/cve2/rtl/cve2_if_stage.sv
+${REPO}/third_party/cve2/rtl/cve2_load_store_unit.sv
+${REPO}/third_party/cve2/rtl/cve2_multdiv_fast.sv
+${REPO}/third_party/cve2/rtl/cve2_multdiv_slow.sv
+${REPO}/third_party/cve2/rtl/cve2_prefetch_buffer.sv
+${REPO}/third_party/cve2/rtl/cve2_pmp.sv
+${REPO}/third_party/cve2/rtl/cve2_register_file_ff.sv
+${REPO}/third_party/cve2/rtl/cve2_wb.sv
+${REPO}/third_party/cve2/rtl/cve2_core.sv
+${REPO}/third_party/cve2/rtl/cve2_top.sv
+${REPO}/third_party/cve2/rtl/cve2_clock_gate.sv
+${REPO}/rtl/cores/cve2/rabbit_cpu.sv

@@ -35,7 +35,8 @@ Everything an instruction *does* lives here. A rabbit core
 Rules for this directory:
 - nothing here may know how many stages a core has;
 - a change here affects every core → run `make formal CORE=rabbit3` **and**
-  `make formal CORE=rabbit5` (CI does both).
+  `make formal CORE=rabbit5` (or `tools/check_all.sh formal`; on GitHub: the
+  on-demand `deep-verify` workflow).
 
 ## M extension (`rabbit_muldiv.sv`)
 
@@ -78,10 +79,14 @@ Whole cores (core + adapter):
 | Core | Area µm² | Longest path | `hello` cycles |
 |---|---|---|---|
 | rabbit3 RV32I | 81 064 | 10.0 ns | 3145 |
-| **rabbit3 RV32IM** | **114 853** (+42 %) | 10.0–10.7 ns | **2756** |
+| **rabbit3 RV32IM** | **114 853** (+42 %) | 10.0–10.7 ns | **2758** |
 | rabbit5 RV32I | 95 381 | 9.2 ns | 3958 |
-| **rabbit5 RV32IM** | **126 549** (+33 %) | 9.0–9.5 ns | **3471** |
-| CV32E40P RV32IMC (reference) | 170 298 | 6.9 ns | 3450 |
+| **rabbit5 RV32IM** | **126 549** (+33 %) | 9.0–9.5 ns | **3473** |
+| CV32E40P RV32IMC (reference) | 170 298 | 6.9 ns | 3447 |
+| Ibex "small" RV32IMC (reference) | 124 899 | 6.4 ns | 3984 |
+| CVE2 RV32IMC (reference) | 128 964 | 6.5 ns | 3984 |
+
+Full comparison (also M and interrupt timing): `../README.md`.
 
 - The longest path does not go through the M unit: in every run it is
   instruction word → decode / trap logic → enable of the 64-bit `minstret` /

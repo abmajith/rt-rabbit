@@ -30,10 +30,10 @@ behind the numbers in the docs and prints a PASS/FAIL summary:
 
 | Stage | What | Time |
 |---|---|---|
-| `quick` | lint, `hello` / `irq` / `muldiv` firmware on rabbit3, rabbit5, CV32E40P; exhaustive 8-bit muldiv simulation | ~1 min |
+| `quick` | lint, `hello` / `irq` / `muldiv` firmware on rabbit3, rabbit5, CV32E40P, CVE2, Ibex; exhaustive 8-bit muldiv simulation | ~2 min |
 | `gls` | the same firmware on the gate-level netlists | ~10 min |
 | `formal` | riscv-formal, timing properties, muldiv unit proof, both rabbit cores | ~60 min |
-| `synth` | sky130 area / delay table (`tools/synth_sky130.sh`, needs the PDK) | ~1 min |
+| `synth` | sky130 area / delay table of all five cores (`tools/synth_sky130.sh`, needs the PDK) | ~2 min |
 | `mutants` | plants known bugs in a copy and checks each is caught (`tools/mutants.py`) | ~30–60 min |
 
 Default is `quick gls`; `tools/check_all.sh all` runs everything. Tools

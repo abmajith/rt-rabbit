@@ -108,12 +108,15 @@ static uint32_t hw(int op, uint32_t a, uint32_t b) {
 
 static const char *const names[8] = {"mul", "mulh", "mulhsu", "mulhu", "div", "divu", "rem", "remu"};
 
-/* ---- timing: cycles from one mcycle read to the next, around one instruction */
+/* ---- timing: cycles between two reads of the SoC cycle counter around one
+ * instruction. The SoC counter (not mcycle) gives the same measurement on every
+ * core: CV32E40P, for example, resets with mcycle stopped (mcountinhibit). */
 #define TIMED(insn) \
     static uint32_t time_##insn(uint32_t a, uint32_t b) { \
         uint32_t t0, t1, r; \
-        __asm__ volatile("csrr %0, mcycle\n\t" #insn " %2, %3, %4\n\tcsrr %1, mcycle" \
-                         : "=&r"(t0), "=&r"(t1), "=&r"(r) : "r"(a), "r"(b)); \
+        __asm__ volatile("lw %0, 0(%3)\n\t" #insn " %2, %4, %5\n\tlw %1, 0(%3)" \
+                         : "=&r"(t0), "=&r"(t1), "=&r"(r) \
+                         : "r"(RABBIT_SIM_CYCLE), "r"(a), "r"(b)); \
         (void)r; return t1 - t0; }
 TIMED(add) TIMED(mul) TIMED(mulhu) TIMED(div) TIMED(remu)
 

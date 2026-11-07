@@ -32,10 +32,10 @@ int main(void) {
     check("divs   ", (uint32_t)((int32_t)neg / 7), (uint32_t)-11);
     check("fib(30)", fib(30), 832040u);
 
-    uint32_t t0 = csr_mcycle();
+    uint32_t t0 = sim_cycles();     /* SoC counter: CV32E40P resets with mcycle stopped */
     volatile uint32_t acc = 0;
     for (int i = 0; i < 100; i++) acc += i;
-    uint32_t t1 = csr_mcycle();
+    uint32_t t1 = sim_cycles();
     check("sum0_99", acc, 4950u);
     sim_puts("  loop cycles = "); sim_puthex(t1 - t0); sim_putc('\n');
 

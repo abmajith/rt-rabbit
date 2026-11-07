@@ -45,7 +45,7 @@ fw|   misa  = 0x40001104        <- RV32, extensions I, M, C
 fw|   [ok]   mul     = 0x068c94ef
 ...
 fw| RESULT: PASS
-hello finished after 3450 cycles, exit code 0x00000000
+hello finished after 3447 cycles, exit code 0x00000000
 ```
 
 Good signals to put in the waveform viewer first:

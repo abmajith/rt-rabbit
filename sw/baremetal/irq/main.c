@@ -4,6 +4,8 @@
  *   1. mip shows the request lines, and only the lines that exist
  *   2. mstatus.MIE = 0 holds an interrupt back; setting it takes the interrupt
  *   3. priority: several lines at once are handled 17 > 16 > 11 > 7
+ *      (cores whose core.mk defines IRQ_FAST_LOW_LINE_FIRST, e.g. Ibex/CVE2:
+ *      16 > 17 > 11 > 7)
  *   4. a periodic timer "control loop" with WFI between ticks; lateness
  *   5. WFI with interrupts globally off: wakes up, but no handler runs
  *   6. latency from raising a line to the first handler instruction (printed)
@@ -101,8 +103,13 @@ int main(void) {
     irq_global_enable();
     spin(5);
     check("priority count   ", n_irq, 4);
+#ifdef IRQ_FAST_LOW_LINE_FIRST
+    check("  1st (fast 0)   ", order[0], IRQ_FAST(0));
+    check("  2nd (fast 1)   ", order[1], IRQ_FAST(1));
+#else
     check("  1st (fast 1)   ", order[0], IRQ_FAST(1));
     check("  2nd (fast 0)   ", order[1], IRQ_FAST(0));
+#endif
     check("  3rd (MEI)      ", order[2], IRQ_MEI);
     check("  4th (MTI)      ", order[3], IRQ_MTI);
 

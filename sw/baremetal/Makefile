@@ -15,7 +15,8 @@ OBJDUMP= $(CROSS)objdump
 COMMON = $(REPO)/sw/baremetal/common
 OUT    = build/$(CORE)/$(PROG)
 
-CFLAGS  = -march=$(CORE_MARCH) -mabi=$(CORE_MABI) -O2 -g -Wall -Wextra \
+# CORE_CFLAGS (core.mk): defines that describe a core's documented deviations
+CFLAGS  = $(CORE_CFLAGS) -march=$(CORE_MARCH) -mabi=$(CORE_MABI) -O2 -g -Wall -Wextra \
           -ffreestanding -fno-builtin -nostdlib -I$(COMMON)
 LDFLAGS = -T $(COMMON)/link.ld -nostartfiles -nostdlib -Wl,--gc-sections -Wl,--no-warn-rwx-segments -lgcc
 
@@ -23,7 +24,7 @@ SRCS = $(COMMON)/crt0.S $(wildcard $(PROG)/*.c) $(wildcard $(PROG)/*.S)
 
 all: $(OUT)/$(PROG).hex $(OUT)/$(PROG).dis
 
-$(OUT)/$(PROG).elf: $(SRCS) $(COMMON)/link.ld $(COMMON)/rabbit_sim.h
+$(OUT)/$(PROG).elf: $(SRCS) $(COMMON)/link.ld $(COMMON)/rabbit_sim.h $(REPO)/rtl/cores/$(CORE)/core.mk
 	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) $(SRCS) -o $@ $(LDFLAGS)
 

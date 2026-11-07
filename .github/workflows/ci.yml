@@ -1,7 +1,12 @@
 name: ci
 
+# Fast checks only (each job about a minute): runs on every pull request and
+# on main. Formal proofs, gate-level simulation and mutation tests take much
+# longer: they are in deep-verify.yml (Actions tab -> "deep-verify" -> Run
+# workflow) and in tools/check_all.sh on your own machine.
 on:
   push:
+    branches: [main]      # branches are checked through their pull request (no double runs)
   pull_request:
   workflow_dispatch:
 
@@ -21,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        core: [cv32e40p, rabbit3, rabbit5]
+        core: [cv32e40p, cve2, ibex, rabbit3, rabbit5]
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
@@ -34,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        core: [cv32e40p, rabbit3, rabbit5]
+        core: [cv32e40p, cve2, ibex, rabbit3, rabbit5]
         # irq: interrupt self-test; cv32e40p is the reference the rabbits must match
         prog: [hello, irq, muldiv]
     steps:
@@ -69,74 +74,14 @@ jobs:
       - working-directory: hw_ip/sim
         run: uv run make TARGET=${{ matrix.target }}   # non-zero exit on any failed test
 
-  # riscv-formal (53 checks, RV32IM) + timing properties + the multiply/divide
-  # unit proof (dv/formal/rabbit/muldiv), for each of our own cores.
-  formal:
-    runs-on: ubuntu-24.04
-    # locally: riscv-formal 3 min (rabbit3) / 0.5 min (rabbit5), timing ~15 min each
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        core: [rabbit3, rabbit5]
-    steps:
-      - uses: actions/checkout@v4
-        with: { submodules: recursive }
-      - uses: YosysHQ/setup-oss-cad-suite@v3
-        with: { version: "2026-11-04" }     # pinned: yosys, sby, boolector
-      - run: yosys -V && sby --version
-      - run: make formal CORE=${{ matrix.core }}
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: formal-results-${{ matrix.core }}
-          path: |
-            dv/formal/rabbit/build/${{ matrix.core }}/riscv-formal/cores/${{ matrix.core }}/checks/*/logfile.txt
-            dv/formal/rabbit/build/${{ matrix.core }}/riscv-formal/cores/${{ matrix.core }}/checks/*/engine_0/*.vcd
-            dv/formal/rabbit/build/${{ matrix.core }}/timing_*/logfile.txt
-            dv/formal/rabbit/build/${{ matrix.core }}/timing_*/engine_0/*.vcd
-
-  # Gate-level smoke test: Yosys builds the netlist, the pinned Verilator image runs it.
-  gls-netlist:
-    runs-on: ubuntu-24.04
-    strategy:
-      matrix:
-        core: [rabbit3, rabbit5]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: YosysHQ/setup-oss-cad-suite@v3
-        with: { version: "2026-11-04" }
-      - run: make gls-netlist CORE=${{ matrix.core }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: gls-netlist-${{ matrix.core }}
-          path: build/gls/${{ matrix.core }}
-
-  gls-smoke:
-    needs: gls-netlist
+  # Exhaustive multiply/divide check at 8 bits (all 524 288 instructions), ~1 s.
+  # The heavy proofs and gate-level runs are in deep-verify.yml (run on demand).
+  muldiv-exhaustive:
     runs-on: ubuntu-24.04
     container: { image: "verilator/verilator:v5.054", options: --entrypoint "" }
-    strategy:
-      fail-fast: false
-      matrix:
-        core: [rabbit3, rabbit5]
     steps:
-      - name: RISC-V GCC
-        run: apt-get update -q && apt-get install -y -q gcc-riscv64-unknown-elf libpython3.12-dev
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/download-artifact@v4
-        with:
-          name: gls-netlist-${{ matrix.core }}
-          path: build/gls/${{ matrix.core }}
-      - run: uv sync
-      - working-directory: dv/cocotb/soc
-        run: uv run make CORE=${{ matrix.core }} PROG=hello GLS=1
-      - working-directory: dv/cocotb/soc
-        run: uv run make CORE=${{ matrix.core }} PROG=irq GLS=1
-      - name: Run muldiv on the gate-level netlist
-        working-directory: dv/cocotb/soc
-        run: uv run make CORE=${{ matrix.core }} PROG=muldiv GLS=1
+      - run: make -C dv/formal/rabbit muldiv-sim
 
   rma-smoke:
     runs-on: ubuntu-24.04
