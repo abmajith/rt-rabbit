@@ -8,6 +8,7 @@
 #   make formal         riscv-formal + timing properties (CORE=rabbit3|rabbit5)
 #   make gls-smoke      synthesize the core with Yosys, run firmware on the netlist
 #   make ci             everything CI runs
+#   make check-all      reproduce all rabbit checks (STAGES="quick gls formal synth mutants")
 REPO := $(abspath .)
 export REPO
 CORE ?= cv32e40p
@@ -72,7 +73,9 @@ formal:
 GLS_DIR := build/gls/$(CORE)
 YOSYS_SLANG := $(shell yosys -p 'help read_slang' >/dev/null 2>&1 || echo -m slang)
 gls-netlist: $(GLS_DIR)/rabbit_cpu_netlist.v
-$(GLS_DIR)/rabbit_cpu_netlist.v: $(wildcard rtl/cores/$(CORE)/*.sv)
+# every file in the core's files.f (incl. rabbit_common), not just rtl/cores/$(CORE)/
+GLS_SOURCES := $(shell grep -v '^//' rtl/cores/$(CORE)/files.f | sed 's|$${REPO}|$(REPO)|')
+$(GLS_DIR)/rabbit_cpu_netlist.v: $(GLS_SOURCES) rtl/cores/$(CORE)/files.f
 	@mkdir -p $(GLS_DIR)
 	yosys $(YOSYS_SLANG) -q -l $(GLS_DIR)/synth.log -p "read_slang \
 	    $$(grep -v '^//' rtl/cores/$(CORE)/files.f | sed 's|$${REPO}|$(REPO)|' | tr '\n' ' ') \
@@ -86,10 +89,15 @@ gls-smoke: sync gls-netlist
 
 ci: lint soc-sim ip-test rma-smoke
 
+# Reproduce everything (see tools/check_all.sh; default stages: quick gls)
+STAGES ?=
+check-all:
+	tools/check_all.sh $(STAGES)
+
 clean:
 	$(MAKE) -C sw/baremetal clean
 	cd dv/cocotb/soc && rm -rf sim_build_* results.xml dump.fst
 	rm -rf build dv/formal/rabbit/build
 	cd hw_ip/sim && uv run $(MAKE) clean
 
-.PHONY: help sync firmware soc-sim soc-waves ip-test lint rma-smoke formal gls-netlist gls-smoke ci clean
+.PHONY: help sync firmware soc-sim soc-waves ip-test lint rma-smoke formal gls-netlist gls-smoke ci check-all clean

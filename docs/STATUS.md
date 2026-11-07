@@ -15,16 +15,19 @@
 
 | Item | rabbit3 (3-stage) | rabbit5 (5-stage) |
 |---|---|---|
-| hello (`make soc-sim CORE=...`) | PASS, 3145 cycles | PASS, 3958 cycles |
+| ISA | RV32IM + Zicsr | RV32IM + Zicsr |
+| hello (`make soc-sim CORE=...`) | PASS, 2756 cycles | PASS, 3471 cycles |
 | interrupts + WFI (`PROG=irq`, same test passes on cv32e40p) | PASS, 7448 cycles | PASS, 9025 cycles |
-| riscv-formal (`make formal CORE=...`) | 45/45 | 45/45 |
+| M extension (`PROG=muldiv`, same test passes on cv32e40p) | PASS; MUL 2 cycles, DIV 34, data-independent | same |
+| riscv-formal (`make formal CORE=...`, M via ALTOPS) | 53/53 | 53/53 |
+| multiply/divide unit proof (`make -C dv/formal/rabbit muldiv`) | PASS: values for all inputs at 4/6/8 bits, latency at 32 bits | (shared) |
 | timing properties T1–T4 + covers | PASS | PASS |
 | interrupt properties I1–I4, sleep W0–W2; worst-case latency (tight) | PASS, 4 cycles | PASS, 7 cycles |
-| gate-level smoke (`make gls-smoke CORE=...`) | PASS, same cycles (hello, irq) | PASS, same cycles (hello, irq) |
-| size, Yosys generic gates | 10.4 k cells | 11.5 k cells |
+| gate-level smoke (`make gls-smoke CORE=...`) | PASS, same cycles (hello, irq, muldiv) | PASS, same cycles (hello, irq, muldiv) |
+| size, sky130 (`synth -booth` + ABC; CV32E40P RV32IMC: 170.3 k µm²) | 114.9 k µm² | 126.5 k µm² |
 
-Next: riscv-formal CSR checks, RISCOF compliance, Zmmul, then the dual-core
-TDM work (M4).
+Next: int8 (and int4) SIMD dot product for quantized inference, riscv-formal
+CSR checks, RISCOF compliance, then the dual-core TDM work (M4).
 Learning path: `rtl/cores/rabbit3/README.md`.
 
 ## Known issues
@@ -48,6 +51,7 @@ Learning path: `rtl/cores/rabbit3/README.md`.
 - [x] CI pipeline
 - [x] Own core rabbit5 v0 with riscv-formal, timing properties, GLS smoke (2026-11-06)
 - [x] Machine timer (mtime/mtimecmp) + interrupt test; rabbit3/rabbit5 interrupts + WFI with proven latency (2026-11-06)
+- [x] M extension on rabbit3/rabbit5: fixed-latency multiply (2) / divide (34), interruptible, proven (2026-11-06)
 - [ ] OBI→Wishbone bridge; attach PWM / QEI / telemetry to the CPU
 - [ ] UART (needed for FPGA and Zephyr console)
 - [ ] RISCOF + riscv-arch-test on CV32E40P (`dv/isa/`)

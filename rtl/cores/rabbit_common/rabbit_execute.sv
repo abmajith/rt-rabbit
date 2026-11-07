@@ -22,9 +22,17 @@
 // asks the pipeline to sleep (sleep_o) unless an enabled interrupt is
 // already pending. The pipeline stops fetching until wake_o.
 //
+// M extension (rabbit_muldiv): a multiply takes 2 cycles in execute, a
+// divide 34, whatever the operands. Until it is done, busy_o = 1: the
+// pipeline must keep the instruction here, with the same operand values,
+// and let nothing younger move. An interrupt ends the wait at once: the
+// multiply/divide is abandoned and runs again after MRET, so the interrupt
+// latency does not grow.
+//
 //   operands ─► ALU ─────────────► result / load-store address
 //           └─► branch unit ─────► taken? target?
 //           └─► CSR unit ────────► old CSR value, trap entry, MRET
+//           └─► rabbit_muldiv ───► product / quotient (2 or 34 cycles)
 //           └─► exception check ─► trap? cause?
 //                                  └► next_pc, redirect
 // =============================================================================
@@ -47,6 +55,7 @@ module rabbit_execute
   output exec_t       res_o,
   output logic        redirect_o,    // control flow changes: fetch from redirect_pc_o
   output logic [31:0] redirect_pc_o,
+  output logic        busy_o,        // M instruction not finished: hold it in execute
 
   input  logic [31:0] irq_i,         // interrupt request lines (see rabbit_pkg)
   output logic        sleep_o,       // WFI executed: stop fetching ...
@@ -59,11 +68,12 @@ module rabbit_execute
   assign irq_take = valid_i && irq_pending;
 
   // RVFI: the next instruction that executes is the first one of the handler
+  // (cleared when an instruction leaves execute: an M instruction may wait)
   logic intr_next_q;
   always_ff @(posedge clk_i or negedge rst_ni) begin
-    if (!rst_ni)       intr_next_q <= 1'b0;
-    else if (irq_take) intr_next_q <= 1'b1;
-    else if (valid_i)  intr_next_q <= 1'b0;
+    if (!rst_ni)                 intr_next_q <= 1'b0;
+    else if (irq_take)           intr_next_q <= 1'b1;
+    else if (valid_i && !busy_o) intr_next_q <= 1'b0;
   end
 
 
@@ -113,6 +123,67 @@ module rabbit_execute
     trap = trap && valid_i;
   end
 
+  // ---- M extension ---------------------------------------------------------------
+  logic        md_req, md_done;
+  logic [31:0] md_result;
+  assign md_req = valid_i && dec_i.is_muldiv && !irq_pending;
+  assign busy_o = md_req && !md_done;
+
+`ifdef RABBIT_DIV_STEPS
+  localparam int unsigned DIV_STEPS = `RABBIT_DIV_STEPS;   // formal only, see rabbit_muldiv
+`else
+  localparam int unsigned DIV_STEPS = 32;
+`endif
+
+  logic [31:0] md_value;
+  rabbit_muldiv #(.W(32), .DIV_STEPS(DIV_STEPS)) u_muldiv (
+    .clk_i, .rst_ni,
+    .en_i    (valid_i && dec_i.is_muldiv),
+    .req_i   (md_req),
+    .op_i    (dec_i.funct3),
+    .a_i     (rs1_i),
+    .b_i     (rs2_i),
+    .done_o  (md_done),
+    .result_o(md_value)
+  );
+
+`ifdef RISCV_FORMAL_ALTOPS
+  // riscv-formal cannot reason about real multiplication and division; with
+  // ALTOPS it expects these stand-in results instead (same timing). The real
+  // arithmetic is proven separately: dv/formal/rabbit/muldiv.
+  always_comb begin
+    unique case (dec_i.funct3)
+      3'd0:    md_result = (rs1_i + rs2_i) ^ 32'h5876_063e;   // MUL
+      3'd1:    md_result = (rs1_i + rs2_i) ^ 32'hf658_3fb7;   // MULH
+      3'd2:    md_result = (rs1_i - rs2_i) ^ 32'hecfb_e137;   // MULHSU
+      3'd3:    md_result = (rs1_i + rs2_i) ^ 32'h949c_e5e8;   // MULHU
+      3'd4:    md_result = (rs1_i - rs2_i) ^ 32'h7f85_29ec;   // DIV
+      3'd5:    md_result = (rs1_i - rs2_i) ^ 32'h10e8_fd70;   // DIVU
+      3'd6:    md_result = (rs1_i - rs2_i) ^ 32'h8da6_8fa5;   // REM
+      default: md_result = (rs1_i - rs2_i) ^ 32'h3138_d0e1;   // REMU
+    endcase
+  end
+  logic unused_md;
+  assign unused_md = ^md_value;
+`else
+  assign md_result = md_value;
+`endif
+
+`ifndef SYNTHESIS
+  // The contract with the pipeline: the operands do not change while an M
+  // instruction is held here (also proven in dv/formal/rabbit/timing, M0).
+  logic        busy_q;
+  logic [31:0] rs1_q, rs2_q;
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) busy_q <= 1'b0;
+    else begin
+      busy_q <= busy_o; rs1_q <= rs1_i; rs2_q <= rs2_i;
+      if (busy_q && md_req && (rs1_i != rs1_q || rs2_i != rs2_q))
+        $error("rabbit_execute: operands changed while a multiply/divide was held");
+    end
+  end
+`endif
+
   // ---- CSRs -------------------------------------------------------------------
   logic [31:0] csr_rdata, mtvec, mepc;
   logic        csr_write_req;
@@ -133,7 +204,7 @@ module rabbit_execute
     .trap_pc_i    (pc_i),
     .trap_tval_i  (trap_tval),
     .mret_i       (valid_i && dec_i.is_mret && !trap),
-    .instret_i    (valid_i && !trap),
+    .instret_i    (valid_i && !trap && !busy_o),
     .irq_i,
     .irq_wake_o   (wake_o),
     .irq_pending_o(irq_pending),
@@ -159,7 +230,7 @@ module rabbit_execute
   // ---- the result record ------------------------------------------------------------
   always_comb begin
     res_o           = '0;
-    res_o.valid     = valid_i && !irq_take;   // an interrupted instruction never retires
+    res_o.valid     = valid_i && !irq_take && !busy_o;  // interrupted / not finished: no
     res_o.pc        = pc_i;
     res_o.instr     = instr_i;
     res_o.next_pc   = next_pc;
@@ -170,7 +241,7 @@ module rabbit_execute
     unique case (dec_i.res)
       RES_PC4: res_o.result = pc_i + 32'd4;
       RES_CSR: res_o.result = csr_rdata;
-      default: res_o.result = alu_y;
+      default: res_o.result = dec_i.is_muldiv ? md_result : alu_y;
     endcase
     res_o.is_load   = dec_i.is_load  && !trap;
     res_o.is_store  = dec_i.is_store && !trap;

@@ -1,0 +1,40 @@
+# Unit proof of rtl/cores/rabbit_common/rabbit_muldiv.sv (see muldiv_tb.sv)
+#   make -C dv/formal/rabbit muldiv      (also runs the exhaustive 8-bit simulation)
+#
+#   prove4  W = 4  values + latency, every input, ANY length of history (PDR)
+#   bmc6    W = 6  values + latency, every input, all histories up to 20 cycles
+#   lat32   W = 32 exact latency, any length of history (PDR)
+#   cover6  W = 6  the interesting cases really happen (x/0, overflow, ...)
+#
+# Bit-level ABC engines: on multipliers they are much faster than the SMT
+# solvers used elsewhere (boolector needed >10 min for W = 8 at step 14).
+[tasks]
+prove4
+bmc6
+lat32
+cover6
+
+[options]
+prove4: mode prove
+bmc6:   mode bmc
+bmc6:   depth 20
+lat32:  mode prove
+cover6: mode cover
+cover6: depth 20
+
+[engines]
+prove4: abc pdr
+bmc6:   abc bmc3
+lat32:  abc pdr
+cover6: smtbmc boolector
+
+[script]
+prove4: read_slang rabbit_muldiv.sv muldiv_tb.sv --top muldiv_tb -DW=4 -DCHECK_VALUES
+bmc6:   read_slang rabbit_muldiv.sv muldiv_tb.sv --top muldiv_tb -DW=6 -DCHECK_VALUES
+cover6: read_slang rabbit_muldiv.sv muldiv_tb.sv --top muldiv_tb -DW=6 -DCHECK_VALUES
+lat32:  read_slang rabbit_muldiv.sv muldiv_tb.sv --top muldiv_tb -DW=32
+prep -top muldiv_tb
+
+[files]
+../../../../rtl/cores/rabbit_common/rabbit_muldiv.sv
+muldiv_tb.sv

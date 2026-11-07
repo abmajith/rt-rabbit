@@ -8,14 +8,17 @@ One flow for every rabbit core, selected with `CORE=`:
 make formal CORE=rabbit3                       # from the repo root: everything below
 make -C dv/formal/rabbit CORE=rabbit5 riscv-formal
 make -C dv/formal/rabbit CORE=rabbit5 timing
+make -C dv/formal/rabbit muldiv                               # multiply/divide unit (any core)
 make -C dv/formal/rabbit CORE=rabbit3 check C=insn_add_ch0    # one check
 ```
 
 | Part | What it proves | Files |
 |---|---|---|
-| **riscv-formal** (YosysHQ, submodule) | every RV32I instruction computes what the ISA says (37 checks), plus pipeline consistency: `reg` (forwarding/bypass), `pc_fwd`/`pc_bwd` (branches, flushes), `causal`, `unique`, `liveness`, `ill`, `cover`. The interrupt lines are free inputs, so all of this also holds with interrupts arriving at any time. | `rabbit/checks.cfg` (template), `rabbit/wrapper.sv` |
+| **riscv-formal** (YosysHQ, submodule) | every RV32IM instruction computes what the ISA says (45 checks; MUL/DIV with ALTOPS stand-in results, see below), plus pipeline consistency: `reg` (forwarding/bypass), `pc_fwd`/`pc_bwd` (branches, flushes), `causal`, `unique`, `liveness`, `ill`, `cover`. The interrupt lines are free inputs, so all of this also holds with interrupts arriving at any time. | `rabbit/checks.cfg` (template), `rabbit/wrapper.sv` |
 | **timing properties** (ours) | T1 exact retirement-gap model, T2 first retirement cycle, T3 memory used exactly one cycle before retirement, T4 wake-up from WFI; covers prove every case and the min/max throughput bounds are reachable | `rabbit/timing/rabbit_timing_tb.sv` |
-| **interrupt + sleep properties** (ours, cores with `TIMING_IRQ_LATENCY` > 0) | I1 latency ≤ declared bound, I2 no spurious interrupt, I3 precise `mepc`, I4 correct `mcause`, I5 handler starts at the right vector; W0 sleep only after WFI, W1 wakes on an enabled interrupt, W2 nothing moves while asleep. All 32 interrupt lines free. | same file |
+| **M extension properties** (ours) | T1/T2 include R8 (MUL* exactly +1 cycle, DIV* exactly +DIV_CYCLES−1, whatever the operands); M0 operands do not change while an M instruction waits; M1 (cover) an interrupt is taken while one waits; M2 no instruction fetch while one waits | `rabbit/timing/rabbit_timing_tb.sv` |
+| **multiply/divide unit** (ours) | A1 every result equals the RISC-V definition, L1 exact latency, under any interrupt pattern: every input at W = 4 (unbounded, PDR) and W = 6 (BMC 20), all 524 288 instructions at W = 8 (exhaustive simulation), latency at W = 32 (unbounded) | `rabbit/muldiv/` |
+| **interrupt + sleep properties** (ours, cores with `TIMING_IRQ_LATENCY` > 0) | I1 latency ≤ declared bound (+ the M extra cycles if the handler's first instruction is itself MUL/DIV), I2 no spurious interrupt, I3 precise `mepc`, I4 correct `mcause`, I5 handler starts at the right vector; W0 sleep only after WFI, W1 wakes on an enabled interrupt, W2 nothing moves while asleep. All 32 interrupt lines free. | same file |
 
 Each core **declares** its timing model in `rtl/cores/<core>/core.mk`
 (`TIMING_FIRST_RETIRE`, `TIMING_REDIRECT_GAP`, `TIMING_LOADUSE_GAP`,
@@ -34,8 +37,9 @@ that sleep ends when it must is W1.
 
 | | rabbit3 | rabbit5 |
 |---|---|---|
-| riscv-formal (interrupt lines 7 and 16 free) | 45/45 PASS, ~3 min | 45/45 PASS, ~30 s |
-| timing T1–T4, I1–I5, W0–W2 + 14 covers | PASS, ~15 min | PASS, ~18 min |
+| riscv-formal RV32IM (interrupt lines 7 and 16 free) | 53/53 PASS, ~10 min | 53/53 PASS, ~1 min |
+| timing T1–T4, I1–I5, W0–W2, M0–M2 + covers | PASS, ~35 min | PASS, ~22 min |
+| muldiv unit proof + exhaustive 8-bit simulation (shared) | PASS, ~1 min | (same) |
 | proven worst-case interrupt latency (cover: reached) | 4 cycles | 7 cycles |
 
 riscv-formal gets only two free interrupt lines: with all 32 free, rabbit3's
@@ -59,8 +63,8 @@ How it fits together:
    the converted file made the solver ~60x slower).
 
 Bounded proofs: all results hold for every instruction stream up to the
-configured depth (12–20 cycles for riscv-formal, 24 for timing), not for
-unbounded time.
+configured depth (12–26 cycles for riscv-formal, 24 for timing), not for
+unbounded time (except the muldiv tasks run with PDR, which are unbounded).
 
 ### Mutation results (the checks are not vacuous)
 
@@ -78,6 +82,43 @@ unbounded time.
 | vectored `mtvec` ignored (always jump to the base) | I5 |
 | rabbit5 checked against IRQ_LATENCY=6 | I1 |
 | rabbit5: `stall = load_use` without `&& !redirect` | nothing — an *equivalent* mutant: every user of `stall` already gives `redirect` priority, so the term is redundant |
+| muldiv: x/0 sign rule removed | unit proof A1 (W = 4) + exhaustive simulation |
+| muldiv: MULH ignores the sign of rs2 | unit proof A1 (W = 6) + exhaustive simulation |
+| muldiv: no restart after an interrupt | unit proof L1 + exhaustive simulation |
+| muldiv: divide one cycle longer | unit proof L1 (W = 32) |
+| `rvfi_intr` cleared while an M instruction waits (real bug, fixed) | riscv-formal `pc_fwd` |
+| rabbit5: forwarded operands not stored while EX waits | M0 + riscv-formal `reg` |
+| rabbit3: fetch continues while an M instruction waits | M2 + riscv-formal `pc_fwd` |
+| rabbit3: no instruction holding register while X waits | M0 + riscv-formal `liveness` |
+
+### M extension: how multiply and divide are verified
+
+SAT/SMT solvers cannot prove two different 32-bit multipliers equal (the
+problem blows up beyond ~8 bits: boolector needed > 10 min to reach step 14
+at W = 8). So the work is split:
+
+1. **riscv-formal with ALTOPS** checks everything *around* the arithmetic:
+   decode, operand forwarding, the pipeline holding the instruction, register
+   write-back, interrupts during a wait. With `RISCV_FORMAL_ALTOPS` the core
+   returns stand-in results ((rs1 ± rs2) XOR a constant) with the same timing.
+   The real multiplier is then unused and optimised away, so the proofs stay
+   fast. A divide takes 34 cycles, which does not fit the proof depth, so
+   these proofs use a 2-step divider (`FORMAL_DIV_STEPS`, `core.mk`): the
+   pipeline only ever sees `busy`/`done`, never the step count.
+2. **The unit proof** (`muldiv/`) checks the real arithmetic and the real
+   latency on the very same RTL, which is written for any width W. Exact
+   latency (34 cycles at 32 bits) is a counter property and is proven at full
+   width, for any length of history.
+3. **Simulation**: `sw/baremetal/muldiv` runs corner cases and random 32-bit
+   operands on every core, and checks that the timing does not depend on the
+   data.
+
+Found by this flow while adding M: the "first instruction of the handler"
+flag (`rvfi_intr`) was lost when that instruction was itself a multiply or
+divide (pc_fwd); the liveness window had to grow because an interrupted
+divide followed by a handler that starts with a divide is legal but slow;
+and I1 had to say what latency means when the handler's first instruction
+is itself a MUL/DIV (it is *taken* within the bound, then runs normally).
 
 ### Lesson learned: free inputs must be real inputs
 
