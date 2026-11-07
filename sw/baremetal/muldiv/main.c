@@ -1,6 +1,8 @@
-/* M-extension self-test for the rabbit SoC (runs on every core; CV32E40P is
- * the reference).
+/* M-extension self-test for the rabbit SoC (runs on every configuration;
+ * CV32E40P is the reference).
  *
+ * With the M extension (compiled with -march=rv32im..., __riscv_mul defined):
+ *   0. misa says M
  *   1. corner cases of all eight instructions (x/0, -2^31/-1, signs, ...)
  *   2. pseudo-random operands, checked against a software model that uses
  *      only shifts and adds (no MUL/DIV instructions)
@@ -9,9 +11,22 @@
  *   4. an interrupt in the middle of a divide is taken at once, and the
  *      divide still gives the right result afterwards
  *
+ * Without it (a configuration with RV32M := 0, -march=rv32i...):
+ *   0. misa does not say M
+ *   5. each of the eight instructions traps as an illegal instruction
+ *      (mcause = 2, mtval = the instruction), and does not write rd
+ *   6. C code still multiplies and divides correctly (the compiler calls
+ *      libgcc's software routines instead)
+ *
  * Returns the number of failed checks (0 = PASS).
  */
 #include "rabbit_sim.h"
+
+#ifdef __riscv_mul
+#define HAS_M 1
+#else
+#define HAS_M 0
+#endif
 
 static int failures;
 
@@ -38,11 +53,17 @@ static void check(const char *name, uint32_t got, uint32_t expected) {
     sim_putc('\n');
 }
 
-/* ---- the eight instructions, exactly as written (no compiler tricks) ---- */
-#define OP(name) \
+/* ---- the eight instructions, exactly as encoded (no compiler tricks) ----
+ * Written with .insn (opcode OP = 0x33, funct7 = 1, funct3 = which one), so
+ * this file also assembles for a core without M, where they must trap. rd
+ * starts as RD_UNTOUCHED: an instruction that traps must leave it so. */
+#define RD_UNTOUCHED 0x5a5a5a5au
+#define OP(name, funct3) \
     static inline uint32_t op_##name(uint32_t a, uint32_t b) { \
-        uint32_t r; __asm__ volatile(#name " %0, %1, %2" : "=r"(r) : "r"(a), "r"(b)); return r; }
-OP(mul) OP(mulh) OP(mulhsu) OP(mulhu) OP(div) OP(divu) OP(rem) OP(remu)
+        uint32_t r = RD_UNTOUCHED; \
+        __asm__ volatile(".insn r 0x33, " #funct3 ", 1, %0, %1, %2" : "+r"(r) : "r"(a), "r"(b)); \
+        return r; }
+OP(mul, 0) OP(mulh, 1) OP(mulhsu, 2) OP(mulhu, 3) OP(div, 4) OP(divu, 5) OP(rem, 6) OP(remu, 7)
 
 /* ---- software model: shifts and adds only -------------------------------- */
 static uint64_t umul64(uint32_t a, uint32_t b) {
@@ -108,6 +129,7 @@ static uint32_t hw(int op, uint32_t a, uint32_t b) {
 
 static const char *const names[8] = {"mul", "mulh", "mulhsu", "mulhu", "div", "divu", "rem", "remu"};
 
+#if HAS_M
 /* ---- timing: cycles between two reads of the SoC cycle counter around one
  * instruction. The SoC counter (not mcycle) gives the same measurement on every
  * core: CV32E40P, for example, resets with mcycle stopped (mcountinhibit). */
@@ -119,14 +141,23 @@ static const char *const names[8] = {"mul", "mulh", "mulhsu", "mulhu", "div", "d
                          : "r"(RABBIT_SIM_CYCLE), "r"(a), "r"(b)); \
         (void)r; return t1 - t0; }
 TIMED(add) TIMED(mul) TIMED(mulhu) TIMED(div) TIMED(remu)
+#endif
 
-/* ---- interrupt during a divide ---------------------------------------------- */
+/* ---- trap handler: interrupts (test 4) and, without M, illegal M
+ * instructions (test 5) ------------------------------------------------------ */
 static volatile uint32_t n_irq, entry_cycle;
+static volatile uint32_t n_illegal, last_mtval;
 
 void __attribute__((interrupt("machine"))) trap_entry(void) {
     uint32_t now = sim_cycles();
     uint32_t cause = CSR_READ(mcause);
-    if (!(cause & MCAUSE_IRQ)) {                  /* an exception: stop the test */
+    if (!HAS_M && cause == 2) {                   /* illegal instruction: skip it */
+        n_illegal++;
+        last_mtval = CSR_READ(mtval);
+        CSR_WRITE(mepc, CSR_READ(mepc) + 4);
+        return;
+    }
+    if (!(cause & MCAUSE_IRQ)) {                  /* any other exception: stop the test */
         REG32(RABBIT_SIM_EXIT) = 0xDEAD0000u | (cause & 0x3ff);
         for (;;) { }
     }
@@ -138,11 +169,8 @@ void __attribute__((interrupt("machine"))) trap_entry(void) {
 static uint32_t xs = 0x2545F491u;                /* xorshift32 */
 static uint32_t rnd(void) { xs ^= xs << 13; xs ^= xs >> 17; xs ^= xs << 5; return xs; }
 
-int main(void) {
-    sim_puts("\nrt-rabbit: M extension test\n");
-    irq_global_disable();
-    CSR_WRITE(mie, 0);
-
+#if HAS_M
+static void test_with_m(void) {
     /* 1. corner cases --------------------------------------------------------- */
     static const uint32_t v[] = {0, 1, 7, 0x7fffffffu, 0x80000000u, 0x80000001u,
                                  0xfffffffeu, 0xffffffffu, 0x0000ffffu, 0xdeadbeefu};
@@ -213,7 +241,45 @@ int main(void) {
     check("irq taken during divide               ", n_irq, 1);
     check("  divide result after MRET            ", q, 10309278u);
     sim_puts("  raise -> handler (cycles) = "); sim_puthex(entry_cycle - t0); sim_putc('\n');
+}
 
+#else
+static void test_without_m(void) {
+    /* 5. every M instruction traps and leaves rd alone ------------------------- */
+    for (int op = 0; op < 8; op++) {
+        uint32_t before = n_illegal;
+        uint32_t r = hw(op, 6, 3);
+        uint32_t fixed = last_mtval & 0xfe00707fu;      /* funct7, funct3, opcode */
+        uint32_t want  = (1u << 25) | ((uint32_t)op << 12) | 0x33u;
+        if (n_illegal != before + 1 || fixed != want || r != RD_UNTOUCHED)
+            fail(names[op], n_illegal - before, last_mtval, r, want);
+    }
+    check("M instructions trapping as illegal    ", n_illegal, 8);
+
+    /* 6. C code multiplies and divides in software (libgcc) ------------------- */
+    int before = failures;
+    for (int n = 0; n < 48; n++) {
+        volatile uint32_t a = rnd(), b = rnd() >> (rnd() & 31);
+        if (b == 0) b = 1;
+        if (a * b != model(0, a, b)) fail("sw mul", a, b, a * b, model(0, a, b));
+        if (a / b != model(5, a, b)) fail("sw divu", a, b, a / b, model(5, a, b));
+        if (a % b != model(7, a, b)) fail("sw remu", a, b, a % b, model(7, a, b));
+    }
+    check("software mul/div (48 x 3) failures    ", failures - before, 0);
+}
+#endif
+
+int main(void) {
+    sim_puts(HAS_M ? "\nrt-rabbit: M extension test\n"
+                   : "\nrt-rabbit: M extension test (configuration without M)\n");
+    irq_global_disable();
+    CSR_WRITE(mie, 0);
+    check("misa.M                                ", (CSR_READ(misa) >> 12) & 1u, HAS_M);
+#if HAS_M
+    test_with_m();
+#else
+    test_without_m();
+#endif
     sim_puts(failures ? "RESULT: FAIL\n" : "RESULT: PASS\n");
     return failures;
 }

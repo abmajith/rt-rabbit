@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Energy of one program on one routed core, from real switching activity.
+# Energy of one program on one routed SoC configuration, from real switching activity.
 #
-#   asic/orfs/energy.sh <core> [program] [period of the ORFS run, ns] [platform]
+#   asic/orfs/energy.sh <config> [program] [period of the ORFS run, ns] [platform]
 #   asic/orfs/energy.sh rabbit3 hello            # uses build/orfs/sky130hd/rabbit3_8.0ns
 #
-# Needs a finished asic/orfs/run.sh of that core. Steps:
+# Needs a finished asic/orfs/run.sh of that configuration. Steps:
 #  1. Yosys rebuilds every sky130 cell of the routed netlist (6_final.v) from
 #     the logic function in the cell library, so Verilator can simulate it.
 #     The cells stay separate modules: flattening would rename the routed
@@ -14,20 +14,20 @@
 #  3. OpenSTA computes power from that activity, with the wire capacitances
 #     of the layout (SPEF), at the simulation clock (10 ns = 100 MHz);
 #  4. energy = power x cycles x 10 ns.
-# Output: build/orfs/<platform>/<core>_<period>ns/energy/<program>.*
+# Output: build/orfs/<platform>/<config>_<period>ns/energy/<program>.*
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
-CORE=${1:?usage: asic/orfs/energy.sh <core> [program] [period ns] [platform]}
+CONFIG=${1:?usage: asic/orfs/energy.sh <config> [program] [period ns] [platform]}
 PROG=${2:-hello}
 PERIOD=${3:-8.0}
 PLATFORM=${4:-sky130hd}
 SIM_PERIOD_NS=10      # the cocotb testbench clock
 IMAGE=${ORFS_IMAGE:-openroad/orfs@sha256:8b4f3942318d740ea1f73f4f895bbac150b32e41eb3b7baf7722adec6538bbcf}
 
-WORK=$REPO/build/orfs/$PLATFORM/${CORE}_${PERIOD}ns
-RES=$WORK/results/$PLATFORM/$CORE/base
+WORK=$REPO/build/orfs/$PLATFORM/${CONFIG}_${PERIOD}ns
+RES=$WORK/results/$PLATFORM/$CONFIG/base
 OUT=$WORK/energy
-[ -f "$RES/6_final.v" ] || { echo "no routed netlist: run asic/orfs/run.sh $CORE $PLATFORM $PERIOD first"; exit 1; }
+[ -f "$RES/6_final.v" ] || { echo "no routed netlist: run asic/orfs/run.sh $CONFIG $PLATFORM $PERIOD first"; exit 1; }
 mkdir -p "$OUT"
 
 case $PLATFORM in
@@ -50,10 +50,10 @@ fi
 #    One run at a time: the testbench always writes dump.fst in its folder.
 cd "$REPO/dv/cocotb/soc"
 rm -f dump.fst
-uv run make -j8 CORE="$CORE" PROG="$PROG" GLS=1 NETLIST="$OUT/rabbit_cpu_pnr.v" WAVES=1 \
-     VERILATOR_EXTRA=--trace-underscore SIM_BUILD="sim_build_${CORE}_pnr_${PLATFORM}" > "$OUT/$PROG.sim.log" 2>&1 || true
+uv run make -j8 CONFIG="$CONFIG" PROG="$PROG" GLS=1 NETLIST="$OUT/rabbit_cpu_pnr.v" WAVES=1 \
+     VERILATOR_EXTRA=--trace-underscore SIM_BUILD="sim_build_${CONFIG}_pnr_${PLATFORM}" > "$OUT/$PROG.sim.log" 2>&1 || true
 CYCLES=$(grep -oE 'finished after [0-9]+ cycles' "$OUT/$PROG.sim.log" | grep -oE '[0-9]+' || true)
-grep -q "RESULT: PASS" "$OUT/$PROG.sim.log" || { echo "$CORE/$PROG: program failed on the routed netlist, see $OUT/$PROG.sim.log"; exit 1; }
+grep -q "RESULT: PASS" "$OUT/$PROG.sim.log" || { echo "$CONFIG/$PROG: program failed on the routed netlist, see $OUT/$PROG.sim.log"; exit 1; }
 # OpenSTA's VCD reader knows 'wire' but not 'logic' (only a type label in VCD)
 fst2vcd dump.fst 2>/dev/null | sed 's/^\$var logic /$var wire /' > "$OUT/$PROG.vcd"
 rm -f dump.fst
@@ -74,7 +74,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$REPO:$REPO" "$IMAGE" bash -c "
   openroad -no_init -exit $OUT/$PROG.power.tcl" > "$OUT/$PROG.power.log" 2>&1
 
 # 4. summary
-python3 - "$OUT/$PROG.power.log" "$CORE" "$PROG" "$CYCLES" "$SIM_PERIOD_NS" <<'EOF'
+python3 - "$OUT/$PROG.power.log" "$CONFIG" "$PROG" "$CYCLES" "$SIM_PERIOD_NS" <<'EOF'
 import re, sys
 log, core, prog, cycles, t = open(sys.argv[1]).read(), sys.argv[2], sys.argv[3], int(sys.argv[4]), float(sys.argv[5])
 ann = re.search(r"^vcd\s+(\d+)", log, re.M); un = re.search(r"^unannotated\s+(\d+)", log, re.M)

@@ -10,7 +10,8 @@ support lives in its own sub-directory and provides:
 | `files.f` | Verilator/Yosys file list (paths relative to the repo root via the `${REPO}` environment variable) |
 | `core.mk` | Make fragment: `CORE_MARCH`, `CORE_MABI`, extra simulator flags; `CORE_CFLAGS` for documented deviations from the contract (seen by the firmware) |
 
-Select a core with `make CORE=<dir-name> ...` (default: `cv32e40p`).
+Select a core with `make CORE=<dir-name> ...` (default: `cv32e40p`), or a
+variant of it with `make CONFIG=<name> ...` (`configs/README.md`).
 Only one `rabbit_cpu` is compiled per build, so no `ifdef` soup is needed.
 
 ## Port contract (v0)

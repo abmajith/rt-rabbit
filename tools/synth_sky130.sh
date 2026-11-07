@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Area and longest combinational path of the cores on sky130 (Yosys + ABC).
+# Area and longest combinational path of SoC configurations on sky130 (Yosys + ABC).
 #
-#   tools/synth_sky130.sh                 rabbit3 rabbit5 cv32e40p cve2 ibex
-#   tools/synth_sky130.sh rabbit3         one core
+#   tools/synth_sky130.sh                 every configuration in configs/
+#   tools/synth_sky130.sh rabbit3 rabbit3_rv32i     selected ones
 #
 # Finds the sky130_fd_sc_hd typical-corner liberty file in $SKY130_LIB, or
 # under $PDK_ROOT, or under ~/.ciel / ~/.volare (ciel / volare installs).
 # Numbers are a quick comparison, not sign-off: no wires, no placement, and
 # ABC's delay varies by about +-0.6 ns between runs of nearly the same RTL.
-# Logs: build/synth_sky130/<core>.log
+# Logs: build/synth_sky130/<config>.log
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 cd "$REPO"
@@ -28,10 +28,10 @@ fi
 
 OUT=build/synth_sky130
 mkdir -p "$OUT"
-CORES=${*:-rabbit3 rabbit5 cv32e40p cve2 ibex}
+CONFIGS=${*:-$(ls configs/*.mk | xargs -n1 basename | sed 's/\.mk$//')}
 
-printf '%-10s %14s %12s %12s\n' core "area um2" "of it flops" "delay ns"
-for c in $CORES; do
+printf '%-16s %14s %12s %12s\n' config "area um2" "of it flops" "delay ns"
+for c in $CONFIGS; do
   SRC=$(tools/core_sources.sh "$c" "$OUT/src_$c")
   yosys -p "read_slang $SRC --top rabbit_cpu -DSYNTHESIS; \
             synth -top rabbit_cpu -booth -flatten; \
@@ -41,5 +41,5 @@ for c in $CORES; do
   area=$(grep 'Chip area for module' "$OUT/$c.log" | tail -1 | awk '{print $NF}')
   seq=$(grep 'used for sequential elements' "$OUT/$c.log" | tail -1 | awk '{print $(NF-1)}')
   dly=$(grep -oE 'Delay *= *[0-9.]+ ps' "$OUT/$c.log" | tail -1 | grep -oE '[0-9.]+')
-  printf '%-10s %14.0f %12.0f %12.2f\n' "$c" "$area" "$seq" "$(echo "$dly / 1000" | bc -l)"
+  printf '%-16s %14.0f %12.0f %12.2f\n' "$c" "$area" "$seq" "$(echo "$dly / 1000" | bc -l)"
 done

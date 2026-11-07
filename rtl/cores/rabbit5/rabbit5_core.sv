@@ -1,5 +1,5 @@
 // =============================================================================
-// rabbit5_core — 5-stage in-order RV32IM pipeline (single hart)
+// rabbit5_core — 5-stage in-order RV32I(M) pipeline (single hart)
 // =============================================================================
 //
 //   cycle:   1    2    3    4    5    6
@@ -63,6 +63,7 @@
 module rabbit5_core
   import rabbit_pkg::*;
 #(
+  parameter rabbit_cfg_t CFG        = RABBIT_CFG,     // optional ISA parts (rabbit_pkg)
   parameter logic [31:0] BOOT_ADDR  = 32'h0000_0080,
   parameter logic [31:0] MTVEC_ADDR = 32'h0000_0000,
   parameter logic [31:0] HART_ID    = 32'h0000_0000
@@ -203,7 +204,7 @@ module rabbit5_core
   end
 
   decoded_t id_dec;
-  rabbit_decoder u_decoder (.instr_i(id_instr), .dec_o(id_dec));
+  rabbit_decoder #(.CFG(CFG)) u_decoder (.instr_i(id_instr), .dec_o(id_dec));
 
   // Register file: read in ID, written in WB (write-first bypass inside)
   logic [31:0] id_rs1_val, id_rs2_val;
@@ -260,7 +261,7 @@ module rabbit5_core
   assign ex_rs2 = forward(ex_q.dec.rs2, ex_q.rs2_val);
 
   exec_t ex_res;
-  rabbit_execute #(.MTVEC_RESET(MTVEC_ADDR), .HART_ID(HART_ID)) u_execute (
+  rabbit_execute #(.CFG(CFG), .MTVEC_RESET(MTVEC_ADDR), .HART_ID(HART_ID)) u_execute (
     .clk_i, .rst_ni,
     .valid_i      (ex_q.valid),
     .pc_i         (ex_q.pc),

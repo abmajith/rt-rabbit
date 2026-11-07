@@ -1,13 +1,15 @@
 // =============================================================================
 // rabbit_decoder — instruction bits -> decoded_t   (pure combinational)
 // =============================================================================
-// Supported: all of RV32I and RV32M, plus FENCE (a no-op) and WFI,
+// Supported: all of RV32I, RV32M if CFG.rv32m, plus FENCE (a no-op) and WFI,
 // ECALL, EBREAK, MRET and the six Zicsr instructions.
 // Anything else sets `illegal`; the EX stage turns that into a trap.
 // =============================================================================
 module rabbit_decoder
   import rabbit_pkg::*;
-(
+#(
+  parameter rabbit_cfg_t CFG = RABBIT_CFG
+) (
   input  logic [31:0] instr_i,
   output decoded_t    dec_o
 );
@@ -134,9 +136,12 @@ module rabbit_decoder
           3'b111: dec_o.alu_op = ALU_AND;
           default: ;
         endcase
-        // M extension (funct7 = 0000001): all eight funct3 values exist
-        if (funct7 == FUNCT7_MULDIV)
-          dec_o.is_muldiv = 1'b1;
+        // M extension (funct7 = 0000001): all eight funct3 values exist;
+        // without M (CFG.rv32m = 0) the whole group is illegal
+        if (funct7 == FUNCT7_MULDIV) begin
+          dec_o.is_muldiv = CFG.rv32m;
+          dec_o.illegal   = !CFG.rv32m;
+        end
         // only ADD/SUB and SRL/SRA have a second encoding (funct7 = 0100000)
         else if (funct7 == 7'b010_0000)
           dec_o.illegal = (funct3 != 3'b000) && (funct3 != 3'b101);

@@ -1,7 +1,9 @@
-// rabbit_cpu adapter for rabbit5 (our own 5-stage RV32IM core).
+// rabbit_cpu adapter for rabbit5 (our own 5-stage RV32I core, M optional).
 // See rtl/cores/README.md for the port contract. rabbit5 needs memories that
 // grant immediately and answer one cycle later (rabbit5_core.sv, rule R4).
 module rabbit_cpu #(
+    // optional ISA parts; the default comes from the build (configs/, rabbit_pkg)
+    parameter rabbit_pkg::rabbit_cfg_t CFG = rabbit_pkg::RABBIT_CFG,
     parameter logic [31:0] BOOT_ADDR  = 32'h0000_0080,
     parameter logic [31:0] MTVEC_ADDR = 32'h0000_0000
 ) (
@@ -31,7 +33,7 @@ module rabbit_cpu #(
     input  logic        debug_req_i,
     output logic        core_sleep_o
 );
-  rabbit5_core #(.BOOT_ADDR(BOOT_ADDR), .MTVEC_ADDR(MTVEC_ADDR)) u_core (
+  rabbit5_core #(.CFG(CFG), .BOOT_ADDR(BOOT_ADDR), .MTVEC_ADDR(MTVEC_ADDR)) u_core (
       .clk_i, .rst_ni, .fetch_enable_i,
       .instr_req_o, .instr_gnt_i, .instr_rvalid_i, .instr_addr_o, .instr_rdata_i,
       .data_req_o, .data_gnt_i, .data_rvalid_i, .data_we_o, .data_be_o,
