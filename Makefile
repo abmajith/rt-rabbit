@@ -8,6 +8,7 @@
 #   make formal         riscv-formal + timing properties (CORE=rabbit3|rabbit5)
 #   make gls-smoke      synthesize the core with Yosys, run firmware on the netlist
 #   make ci             everything CI runs
+#   make check-all      reproduce all rabbit checks (STAGES="quick gls formal synth mutants")
 REPO := $(abspath .)
 export REPO
 CORE ?= cv32e40p
@@ -88,10 +89,15 @@ gls-smoke: sync gls-netlist
 
 ci: lint soc-sim ip-test rma-smoke
 
+# Reproduce everything (see tools/check_all.sh; default stages: quick gls)
+STAGES ?=
+check-all:
+	tools/check_all.sh $(STAGES)
+
 clean:
 	$(MAKE) -C sw/baremetal clean
 	cd dv/cocotb/soc && rm -rf sim_build_* results.xml dump.fst
 	rm -rf build dv/formal/rabbit/build
 	cd hw_ip/sim && uv run $(MAKE) clean
 
-.PHONY: help sync firmware soc-sim soc-waves ip-test lint rma-smoke formal gls-netlist gls-smoke ci clean
+.PHONY: help sync firmware soc-sim soc-waves ip-test lint rma-smoke formal gls-netlist gls-smoke ci check-all clean
