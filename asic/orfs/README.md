@@ -12,7 +12,7 @@ asic/orfs/run.sh ibex ihp-sg13g2 8       # other PDK / period
 
 Needs Docker; the image `openroad/orfs` is pinned by digest in `run.sh` (about
 6.5 GB, pulled on first use). Nothing is installed on the machine. Results:
-`build/orfs/<platform>/<core>/` — reports, logs, the layout (`6_final.gds`)
+`build/orfs/<platform>/<core>_<period>ns/` — reports, logs, the layout (`6_final.gds`)
 and pictures (`reports/.../final_*.webp`, incl. the worst path).
 
 How it works:
@@ -41,6 +41,17 @@ How it works:
   read → 33x17 multiplier → partial-product register, 9.4 ns); its overall
   limit is the memory-to-memory path that defines a 3-stage core.
 - All cores miss 8 ns, so the tool upsizes and buffers: the areas include
-  that timing repair. Area and power at a relaxed period are the next run.
+  that timing repair.
+
+Relaxed target (12 ns): the tool repairs only what it must, so this run gives
+area without aggressive timing repair (its Fmax numbers mean nothing):
+
+| Core | area µm² | power, vectorless (placeholder) |
+|---|---|---|
+| rabbit3 | 143 561 | 15.5 mW |
+| Ibex (small) | 144 368 | 18.5 mW |
+| CVE2 | 149 313 | 19.7 mW |
+| rabbit5 | 149 933 | 17.3 mW |
+| CV32E40P | 201 990 | 17.0 mW |
 - Power printed by `summary.py` is *vectorless* (default switching activity),
   a placeholder until activity from a gate-level simulation is used.

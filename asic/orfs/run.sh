@@ -12,7 +12,7 @@
 #  2. ORFS (inside openroad/orfs, pinned below) runs synthesis, floorplan,
 #     placement, clock tree, routing;
 #  3. the summary line comes from ORFS' final reports.
-# Output: build/orfs/<platform>/<core>/ (logs/, reports/, results/)
+# Output: build/orfs/<platform>/<core>_<period>ns/ (logs/, reports/, results/)
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 CORE=${1:?usage: asic/orfs/run.sh <core> [platform] [period ns]}
@@ -20,7 +20,7 @@ PLATFORM=${2:-sky130hd}
 PERIOD=${3:-8.0}
 IMAGE=${ORFS_IMAGE:-openroad/orfs@sha256:8b4f3942318d740ea1f73f4f895bbac150b32e41eb3b7baf7722adec6538bbcf}
 
-WORK=$REPO/build/orfs/$PLATFORM/$CORE
+WORK=$REPO/build/orfs/$PLATFORM/${CORE}_${PERIOD}ns
 mkdir -p "$WORK/src"
 
 # 1. one plain Verilog file
